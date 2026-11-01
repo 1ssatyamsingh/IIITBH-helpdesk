@@ -73,11 +73,13 @@ class QueryService:
                 evidence_id=f"S{index}",
                 chunk_id=item.point_id,
                 source_file=item.source_file,
+                document_id=item.document_id,
                 page_number=item.page_number,
                 excerpt=item.text,
                 score=item.score,
                 extraction_method=item.extraction_method,
                 metadata=item.metadata,
+                source_url=f"/api/v1/knowledge-base/documents/{item.document_id}/file",
             )
             for index, item in enumerate(retrieved, start=1)
         ]

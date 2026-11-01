@@ -1,14 +1,22 @@
 const API = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8018/api/v1').replace(/\/$/, '')
 
 export type EvidenceSource = {
-  evidence_id: string; chunk_id: string; source_file: string
+  evidence_id: string; chunk_id: string; source_file: string; document_id: string
   page_number: number | null; excerpt: string; score: number
-  extraction_method: string | null
+  extraction_method: string | null; source_url?: string | null
   metadata: Record<string, unknown>; used_in_answer: boolean
 }
 export type QueryResult = {
   query_id: string; status: string; answer: string | null
   insufficient_evidence: boolean; sources: EvidenceSource[]
+}
+export type KnowledgeDocument = {
+  document_id: string; source_file: string; file_type: string | null
+  chunk_count: number; page_count: number; source_url?: string | null
+  metadata: Record<string, unknown>
+}
+export type KnowledgeBaseResult = {
+  collection: string; document_count: number; documents: KnowledgeDocument[]
 }
 export type IngestionFile = {
   file_id: string; original_filename: string; file_type: string | null
@@ -34,6 +42,8 @@ export function checkApi() { return fetch(API + '/health').then(r => r.ok).catch
 export function askQuestion(question: string) {
   return request<QueryResult>('/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, top_k: 6 }) })
 }
+export function getKnowledgeBase() { return request<KnowledgeBaseResult>('/knowledge-base/documents') }
+export function sourceDocumentUrl(documentId: string) { return API + '/knowledge-base/documents/' + encodeURIComponent(documentId) + '/file' }
 export function uploadDocuments(files: File[]) {
   const body = new FormData()
   files.forEach(file => body.append('files', file))

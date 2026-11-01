@@ -20,11 +20,13 @@ class EvidenceSource(BaseModel):
     evidence_id: str
     chunk_id: str
     source_file: str
+    document_id: str = ""
     page_number: int | None = None
     excerpt: str
     score: float
     extraction_method: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    source_url: str | None = None
     used_in_answer: bool = False
 
 

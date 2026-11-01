@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react'
 import {
   Activity, AlertCircle, ArrowRight, BookOpen, Bot, Check, CheckCircle2,
-  CircleHelp, Clock3, CloudUpload, FileText, GraduationCap, Layers3,
+  CircleHelp, Clock3, CloudUpload, FileText, GraduationCap, Layers3, Database,
   LoaderCircle, MessageSquare, PanelLeftClose, Search, Send, ShieldCheck,
   Sparkles, UploadCloud, X, RefreshCw,
 } from 'lucide-react'
-import { askQuestion, checkApi, getIngestionJob, retryIngestionFile, uploadDocuments, type EvidenceSource, type IngestionJob } from './lib/api'
+import { askQuestion, checkApi, getIngestionJob, getKnowledgeBase, sourceDocumentUrl, retryIngestionFile, uploadDocuments, type EvidenceSource, type IngestionJob, type KnowledgeDocument } from './lib/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -13,7 +13,7 @@ import rehypeKatex from 'rehype-katex'
 import 'katex/dist/katex.min.css'
 import './App.css'
 
-type View = 'chat' | 'ingestion'
+type View = 'chat' | 'ingestion' | 'knowledgebase'
 type Message = { id: string; role: 'assistant' | 'user'; content: string; sources?: EvidenceSource[]; error?: boolean }
 const prompts = [
   'What are the B.Tech fee details?',
@@ -44,6 +44,9 @@ function App() {
   const [files, setFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [job, setJob] = useState<IngestionJob | null>(null)
+  const [documents, setDocuments] = useState<KnowledgeDocument[]>([])
+  const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogError, setCatalogError] = useState('')
   const [uploadError, setUploadError] = useState('')
   const [dragging, setDragging] = useState(false)
   const [toast, setToast] = useState('')
@@ -58,6 +61,15 @@ function App() {
     return () => window.clearInterval(timer)
   }, [])
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' }) }, [messages, asking])
+  useEffect(() => {
+    if (view !== 'knowledgebase') return
+    let active = true
+    setCatalogLoading(true); setCatalogError('')
+    getKnowledgeBase().then(result => { if (active) setDocuments(result.documents) })
+      .catch(error => { if (active) setCatalogError(error instanceof Error ? error.message : 'Could not load documents.') })
+      .finally(() => { if (active) setCatalogLoading(false) })
+    return () => { active = false }
+  }, [view])
   useEffect(() => {
     if (!job || !['queued', 'processing'].includes(job.status)) return
     const timer = window.setInterval(async () => {
@@ -137,6 +149,7 @@ function App() {
         <nav className="main-nav">
           <button className={'nav-item ' + (view === 'chat' ? 'active' : '')} onClick={() => setView('chat')}><MessageSquare size={18} />{sidebarOpen && <span>Ask the institute</span>}{view === 'chat' && <i />}</button>
           <button className={'nav-item ' + (view === 'ingestion' ? 'active' : '')} onClick={() => setView('ingestion')}><Layers3 size={18} />{sidebarOpen && <span>Knowledge ingestion</span>}{view === 'ingestion' && <i />}</button>
+          <button className={'nav-item ' + (view === 'knowledgebase' ? 'active' : '')} onClick={() => setView('knowledgebase')}><Database size={18} />{sidebarOpen && <span>Knowledge base</span>}{view === 'knowledgebase' && <i />}</button>
         </nav>
         {sidebarOpen && <>
           <div className="sidebar-divider" />
@@ -148,7 +161,7 @@ function App() {
 
       <main className="main-panel">
         <header className="topbar">
-          <div className="breadcrumb">{!sidebarOpen && <button className="icon-button" onClick={() => setSidebarOpen(true)}><PanelLeftClose size={18} /></button>}<span>IIITBH</span><b>/</b><strong>{view === 'chat' ? 'Ask the institute' : 'Knowledge ingestion'}</strong></div>
+          <div className="breadcrumb">{!sidebarOpen && <button className="icon-button" onClick={() => setSidebarOpen(true)}><PanelLeftClose size={18} /></button>}<span>IIITBH</span><b>/</b><strong>{view === 'chat' ? 'Ask the institute' : view === 'ingestion' ? 'Knowledge ingestion' : 'Knowledge base'}</strong></div>
           <div className="topbar-right"><div className={'connection-pill ' + (apiOnline ? 'connected' : '')}><i />{apiOnline ? 'API connected' : 'API offline'}</div><button className="icon-button" title="About this workspace"><CircleHelp size={18} /></button></div>
         </header>
 
@@ -160,7 +173,7 @@ function App() {
               <div className="message-content"><div className="message-meta">{message.role === 'assistant' ? 'CAMPUS ASSISTANT' : 'YOU'}{message.error && <span className="error-tag">ERROR</span>}</div>
                 <div className={'message-bubble ' + message.role}>
                   {message.role === 'assistant'
-                    ? <div className="markdown-answer"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]}>{message.content}</ReactMarkdown></div>
+                    ? <div className="markdown-answer"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{ table: ({ children }) => <div className="markdown-table-wrap"><table>{children}</table></div> }}>{message.content}</ReactMarkdown></div>
                     : message.content}
                 </div>
                 {!!message.sources?.length && <details className="sources-block">
@@ -168,7 +181,7 @@ function App() {
                   <div className="sources-list">
                     {message.sources.filter(source => source.used_in_answer || !message.sources?.some(item => item.used_in_answer)).map(source => <div className="source-card" key={source.evidence_id}>
                       <div className="source-card-top"><span className="source-ref">{source.evidence_id}</span><strong>{source.source_file}</strong></div>
-                      <div className="source-foot">{source.page_number ? 'Page ' + source.page_number : 'Website / text source'}</div>
+                      <div className="source-foot">{source.page_number ? 'Page ' + source.page_number : 'Website / text source'}<> · <a className="source-link" href={sourceDocumentUrl(source.document_id)} target="_blank" rel="noreferrer">Open source document <ArrowRight size={12} /></a></></div>
                     </div>)}
                   </div>
                 </details>}
@@ -179,7 +192,7 @@ function App() {
           </div></div>
           {messages.length === 1 && <div className="suggestions"><div className="suggestion-label">TRY ASKING</div><div className="suggestion-grid">{prompts.map(prompt => <button className="suggestion-card" key={prompt} onClick={() => void submitQuestion(prompt)}><span>{prompt}</span><ArrowRight size={15} /></button>)}</div></div>}
           <div className="composer-wrap"><form className="composer" onSubmit={onAsk}><Search size={18} /><input value={question} onChange={event => setQuestion(event.target.value)} placeholder="Ask anything about IIIT Bhagalpur..." disabled={!apiOnline || asking} aria-label="Ask a question" /><button className="send-button" type="submit" disabled={!question.trim() || !apiOnline || asking} aria-label="Send question">{asking ? <LoaderCircle className="spin" size={18} /> : <Send size={17} />}</button></form><div className="composer-caption"><ShieldCheck size={12} /> Responses are grounded in indexed sources. Verify time-sensitive notices with the institute.</div></div>
-        </section> : <section className="ingestion-page">
+        </section> : view === 'ingestion' ? <section className="ingestion-page">
           <div className="page-title-row"><div><div className="eyebrow"><Layers3 size={13} /> KNOWLEDGE PIPELINE</div><h1>Knowledge ingestion</h1><p>Bring official institute documents into the assistant’s searchable knowledge base.</p></div><div className="pipeline-badge"><Activity size={15} /> INGESTION PIPELINE</div></div>
           <div className="ingestion-layout"><div className="ingestion-main">
             <div className="section-heading"><div><h2>Add source documents</h2><p>Upload PDF or TXT files. Multiple files can be processed in one batch.</p></div><span>01 / UPLOAD</span></div>
@@ -204,6 +217,15 @@ function App() {
             <div className="aside-card pipeline-card"><div className="aside-card-heading">PROCESSING PIPELINE</div><div className="pipeline-steps"><Step icon={<FileText size={15} />} title="Document validation" detail="Format & integrity checks" /><Step icon={<Layers3 size={15} />} title="Text extraction" detail="PyMuPDF + vision OCR for scans" /><Step icon={<Sparkles size={15} />} title="Chunk & embed" detail="LangChain · BGE-M3" /><Step icon={<Layers3 size={15} />} title="Vector indexing" detail="Qdrant knowledge store" last /></div></div>
             <div className="aside-note"><Clock3 size={15} /><p>Processing runs in a separate worker. Keep the backend worker running while a batch is queued.</p></div>
           </aside></div>
+        </section> : <section className="ingestion-page knowledge-page">
+          <div className="page-title-row"><div><div className="eyebrow"><Database size={13} /> INDEXED CONTENT</div><h1>Knowledge base</h1><p>Browse the unique source documents currently represented in the vector collection.</p></div><button className="primary-button" onClick={() => { setCatalogLoading(true); setCatalogError(''); void getKnowledgeBase().then(result => setDocuments(result.documents)).catch(error => setCatalogError(error instanceof Error ? error.message : 'Could not load documents.')).finally(() => setCatalogLoading(false)) }}><RefreshCw size={15} /> Refresh list</button></div>
+          <div className="catalog-summary"><div><span>INDEXED DOCUMENTS</span><strong>{documents.length}</strong></div><div><span>VECTOR COLLECTION</span><strong>Qdrant</strong></div></div>
+          {catalogLoading && <div className="catalog-state"><LoaderCircle className="spin" size={18} /> Loading indexed documents…</div>}
+          {catalogError && <div className="inline-alert error"><AlertCircle size={16} />{catalogError}</div>}
+          {!catalogLoading && !catalogError && <div className="catalog-list">{documents.length ? documents.map(doc => <article className="catalog-card" key={doc.document_id}>
+            <div className="file-type-icon"><FileText size={18} /></div><div className="catalog-info"><strong>{doc.source_file}</strong><span>{(doc.file_type || 'document').toUpperCase()} · {doc.chunk_count.toLocaleString()} chunks · {doc.page_count ? doc.page_count.toLocaleString() + ' pages' : 'Page count unavailable'}</span><small>ID: {doc.document_id}</small></div>
+            <a className="source-link" href={sourceDocumentUrl(doc.document_id)} target="_blank" rel="noreferrer">Open source <ArrowRight size={13} /></a>
+          </article>) : <div className="catalog-state">No indexed documents found in the configured Qdrant collection.</div>}</div>}
         </section>}
       </main>
     </div>

@@ -221,6 +221,53 @@ class QdrantVectorStore:
             )
         return results
 
+    def list_documents(self) -> list[dict]:
+        """Return a deduplicated catalogue of documents represented in the collection."""
+        if not self.client.collection_exists(self.collection_name):
+            return []
+        self._validate_existing_collection()
+        documents: dict[str, dict] = {}
+        offset = None
+        while True:
+            points, next_offset = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                payload = point.payload or {}
+                document_id = str(payload.get("document_id") or "")
+                source_file = str(payload.get("source_file") or "Unknown document")
+                if not document_id:
+                    continue
+                metadata = payload.get("metadata")
+                if not isinstance(metadata, dict):
+                    metadata = {}
+                entry = documents.setdefault(document_id, {
+                    "document_id": document_id,
+                    "source_file": source_file,
+                    "file_type": payload.get("file_type"),
+                    "chunk_count": 0,
+                    "pages": set(),
+                    "metadata": metadata,
+                    "ingestion_job_id": payload.get("ingestion_job_id"),
+                    "source_url": f"/api/v1/knowledge-base/documents/{document_id}/file",
+                })
+                entry["chunk_count"] += 1
+                page = payload.get("page_number")
+                if page is not None:
+                    entry["pages"].add(int(page))
+            if next_offset is None:
+                break
+            offset = next_offset
+        result = []
+        for item in documents.values():
+            item["page_count"] = len(item.pop("pages"))
+            result.append(item)
+        return sorted(result, key=lambda item: item["source_file"].casefold())
+
     def delete_document(self, document_id: str) -> None:
         if not document_id.strip():
             raise ValueError("document_id must not be empty.")

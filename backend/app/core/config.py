@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     answer_model_id: str | None = None
     answer_model_api_key: str | None = None
 
+    web_search_enabled: bool = True
+    web_search_max_results: int = 6
+
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.frontend_origins.split(",") if origin.strip()]

@@ -217,6 +217,29 @@ class SQLiteJobRepository:
             (job_status, _now(), job_id),
         )
 
+    def delete_file_record(self, job_id: str, file_id: str) -> dict[str, Any]:
+        """Remove a terminal ingestion-file record; active jobs cannot be deleted."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM ingestion_files WHERE file_id = ? AND job_id = ?",
+                (file_id, job_id),
+            ).fetchone()
+            if row is None:
+                raise KeyError("Ingestion file record not found.")
+            if row["status"] in ACTIVE_FILE_STATUSES:
+                raise ValueError("Cannot delete a document while it is being processed.")
+            record = dict(row)
+            connection.execute("DELETE FROM ingestion_files WHERE file_id = ?", (file_id,))
+            remaining = connection.execute(
+                "SELECT COUNT(*) FROM ingestion_files WHERE job_id = ?", (job_id,)
+            ).fetchone()[0]
+            if remaining == 0:
+                connection.execute("DELETE FROM ingestion_jobs WHERE job_id = ?", (job_id,))
+            else:
+                self._refresh_job_status(connection, job_id)
+            return record
+
     def retry_file(self, job_id: str, file_id: str) -> None:
         """Requeue a failed/blocked file without changing its uploaded source bytes."""
         timestamp = _now()

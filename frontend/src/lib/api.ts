@@ -3,7 +3,7 @@ const API = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8018/api/v1'
 export type EvidenceSource = {
   evidence_id: string; chunk_id: string; source_file: string; document_id: string
   page_number: number | null; excerpt: string; score: number
-  extraction_method: string | null; source_url?: string | null
+  extraction_method: string | null; source_url?: string | null; source_type: 'institutional' | 'web'
   metadata: Record<string, unknown>; used_in_answer: boolean
 }
 export type QueryResult = {
@@ -12,7 +12,7 @@ export type QueryResult = {
 }
 export type KnowledgeDocument = {
   document_id: string; source_file: string; file_type: string | null
-  chunk_count: number; page_count: number; source_url?: string | null
+  chunk_count: number; page_count: number
   metadata: Record<string, unknown>
 }
 export type KnowledgeBaseResult = {
@@ -43,7 +43,12 @@ export function askQuestion(question: string) {
   return request<QueryResult>('/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, top_k: 6 }) })
 }
 export function getKnowledgeBase() { return request<KnowledgeBaseResult>('/knowledge-base/documents') }
-export function sourceDocumentUrl(documentId: string) { return API + '/knowledge-base/documents/' + encodeURIComponent(documentId) + '/file' }
+export function deleteKnowledgeDocument(documentId: string) {
+  return request<{ deleted: boolean; deleted_chunks: number; local_upload_deleted: boolean }>(
+    '/knowledge-base/documents/' + encodeURIComponent(documentId),
+    { method: 'DELETE', headers: { 'X-Confirm-Delete': documentId } },
+  )
+}
 export function uploadDocuments(files: File[]) {
   const body = new FormData()
   files.forEach(file => body.append('files', file))

@@ -8,6 +8,7 @@ from app.infrastructure.answer_generation.factory import create_answer_generator
 from app.infrastructure.embeddings.factory import create_embedding_client
 from app.infrastructure.persistence.sqlite_job_repository import SQLiteJobRepository
 from app.infrastructure.vectorstores.qdrant_store import QdrantVectorStore
+from app.infrastructure.web_search.ddgs_search import DDGSWebSearch
 
 
 def get_job_repository(
@@ -43,6 +44,10 @@ def get_query_service(
             vector_store=vector_store,
             answer_generator=answer_generator,
             expected_dimension=settings.embedding_dimension,
+            web_search=DDGSWebSearch(settings.web_search_max_results)
+            if settings.web_search_enabled
+            else None,
+            web_search_enabled=settings.web_search_enabled,
         )
     finally:
         vector_store.client.close()

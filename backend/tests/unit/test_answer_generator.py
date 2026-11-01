@@ -53,8 +53,9 @@ def test_openai_compatible_answer_generator_extracts_citations():
     assert result.answer.endswith("[S1]")
     assert http.url == "https://api.example.test/v1/chat/completions"
     assert http.payload["json"]["model"] == "test-model"
-    assert http.payload["json"]["temperature"] == 0.5
-    assert http.payload["json"]["reasoning_effort"] == "medium"
-    assert http.payload["json"]["include_reasoning"] is False
-    assert len(http.payload["json"]["messages"]) == 1
-    assert "[S1]" in http.payload["json"]["messages"][0]["content"]
+    assert http.payload["json"]["temperature"] == 0.2
+    assert len(http.payload["json"]["messages"]) == 2
+    assert http.payload["json"]["messages"][0]["role"] == "system"
+    assert "untrusted" in http.payload["json"]["messages"][0]["content"].lower()
+    assert "[S1]" in http.payload["json"]["messages"][1]["content"]
+    assert OpenAICompatibleAnswerGenerator.CITATION_PATTERN.findall("[W1] [S1]") == ["W1", "S1"]

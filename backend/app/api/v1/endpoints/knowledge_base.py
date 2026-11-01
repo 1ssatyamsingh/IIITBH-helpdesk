@@ -1,8 +1,7 @@
 from pathlib import Path
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, Header, HTTPException
 
 from app.core.config import Settings, get_settings
 from app.infrastructure.persistence.sqlite_job_repository import SQLiteJobRepository
@@ -28,57 +27,88 @@ def list_knowledge_documents(settings: Settings = Depends(get_settings)) -> dict
             "documents": documents,
         }
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not read the Qdrant document catalogue.") from exc
+        raise HTTPException(
+            status_code=502, detail="Could not read the Qdrant document catalogue."
+        ) from exc
     finally:
         store.client.close()
 
 
-@router.get("/documents/{document_id}/file", summary="Open the original uploaded source document")
-def open_source_document(
+@router.delete("/documents/{document_id}", summary="Delete a document and all its vectors")
+def delete_knowledge_document(
     document_id: str,
+    confirm_delete: str = Header(default="", alias="X-Confirm-Delete"),
     settings: Settings = Depends(get_settings),
-) -> FileResponse:
+) -> dict:
+    if confirm_delete != document_id:
+        raise HTTPException(
+            status_code=400, detail="Explicit document deletion confirmation is required."
+        )
     store = _store(settings)
+    repository = SQLiteJobRepository(settings.data_dir / "ingestion.sqlite3")
+    stored_file = None
     try:
-        offset = None
-        payload = None
-        while True:
-            points, next_offset = store.client.scroll(
-                collection_name=settings.qdrant_collection,
-                limit=256,
-                offset=offset,
-                with_payload=True,
-                with_vectors=False,
-            )
-            match = next((point.payload or {} for point in points if str((point.payload or {}).get("document_id")) == document_id), None)
-            if match is not None:
-                payload = match
-                break
-            if next_offset is None:
-                break
-            offset = next_offset
-        if payload is None:
-            raise HTTPException(status_code=404, detail="Source document is not indexed.")
-        job_id = payload.get("ingestion_job_id")
-        source_file = payload.get("source_file")
-        if not job_id or not source_file:
-            raise HTTPException(status_code=404, detail="Original upload metadata is unavailable.")
+        record = store.get_document_record(document_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Document not found in the knowledge base.")
+        job_id = record.get("ingestion_job_id")
+        source_file = record.get("source_file")
+        if job_id and source_file:
+            job = repository.get_job(str(job_id))
+            if job:
+                stored_file = next(
+                    (
+                        item
+                        for item in job["files"]
+                        if unquote(item["original_filename"]) == unquote(str(source_file))
+                    ),
+                    None,
+                )
+                if stored_file and stored_file["status"] in {
+                    "received",
+                    "validating",
+                    "classifying",
+                    "extracting",
+                    "chunking",
+                    "embedding",
+                    "indexing",
+                }:
+                    raise HTTPException(
+                        status_code=409,
+                        detail="This document is still being processed. Try again after ingestion finishes.",
+                    )
+        deleted_chunks = store.delete_document(document_id)
     except HTTPException:
         raise
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404, detail="Document not found in the knowledge base."
+        ) from exc
     except Exception as exc:
-        raise HTTPException(status_code=502, detail="Could not locate the source document.") from exc
+        raise HTTPException(
+            status_code=502, detail="Qdrant could not complete and verify the document deletion."
+        ) from exc
     finally:
         store.client.close()
 
-    repository = SQLiteJobRepository(settings.data_dir / "ingestion.sqlite3")
-    job = repository.get_job(str(job_id))
-    if not job:
-        raise HTTPException(status_code=404, detail="Original ingestion record is unavailable.")
-    matching = next((item for item in job["files"] if unquote(item["original_filename"]) == unquote(str(source_file)) and item.get("storage_path")), None)
-    if not matching:
-        raise HTTPException(status_code=404, detail="Original uploaded file is unavailable.")
-    path = Path(matching["storage_path"]).resolve()
-    upload_root = (settings.data_dir / "uploads").resolve()
-    if upload_root not in path.parents or not path.is_file():
-        raise HTTPException(status_code=404, detail="Source file is no longer available.")
-    return FileResponse(path, filename=Path(str(source_file)).name, media_type="application/pdf" if path.suffix.lower() == ".pdf" else "text/plain")
+    local_file_deleted = False
+    if stored_file:
+        try:
+            repository.delete_file_record(str(job_id), str(stored_file["file_id"]))
+            storage_path = stored_file.get("storage_path")
+            if storage_path:
+                path = Path(storage_path).resolve()
+                upload_root = (settings.data_dir / "uploads").resolve()
+                if upload_root in path.parents and path.is_file():
+                    path.unlink()
+                    local_file_deleted = True
+        except Exception:
+            # Qdrant deletion has already been verified; never report it as rolled back.
+            local_file_deleted = False
+    return {
+        "deleted": True,
+        "document_id": document_id,
+        "deleted_chunks": deleted_chunks,
+        "local_upload_deleted": local_file_deleted,
+        "message": "Document vectors removed from Qdrant.",
+    }

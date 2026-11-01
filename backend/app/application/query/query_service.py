@@ -1,10 +1,9 @@
+import re
+from datetime import datetime
 from uuid import uuid4
 
-from app.domain.retrieval.models import (
-    EvidenceSource,
-    GeneratedAnswer,
-    QueryResult,
-)
+from app.application.query.guardrails import validate_question
+from app.domain.retrieval.models import EvidenceSource, GeneratedAnswer, QueryResult
 from app.ports.answer_generator import AnswerGenerator
 from app.ports.embedding_client import EmbeddingClient
 from app.ports.vector_store import VectorStore
@@ -14,8 +13,22 @@ class InvalidCitationError(RuntimeError):
     pass
 
 
+CURRENT_PATTERNS = (
+    r"\b(current|currently|present|latest|recent|recently|today|now|this year|as of|up to date|updated)\b",
+    r"\b(who is|who's)\s+(the\s+)?(director|registrar|dean|hod|head of department|chairperson|chairman)\b",
+    r"\b(current|present|new)\s+(director|registrar|dean|hod|head of department|chairperson|chairman)\b",
+    r"\b(name of (the )?(director|registrar|dean|hod))\b",
+    r"\b(upcoming|next)\s+(event|exam|holiday|deadline|notice|convocation|admission|schedule)\b",
+    r"\b(latest|new)\s+(notice|announcement|circular|notification|tender|recruitment)\b",
+)
+
+
+def needs_live_search(question: str) -> bool:
+    return any(re.search(pattern, question, re.IGNORECASE) for pattern in CURRENT_PATTERNS)
+
+
 class QueryService:
-    """Retrieves source evidence and optionally generates a citation-validated answer."""
+    """Hybrid institutional RAG + live web retrieval with query and answer guardrails."""
 
     def __init__(
         self,
@@ -24,49 +37,41 @@ class QueryService:
         answer_generator: AnswerGenerator | None = None,
         embedding_batch_size: int = 16,
         expected_dimension: int = 1024,
+        web_search=None,
+        web_search_enabled: bool = True,
     ) -> None:
         self.embedding_client = embedding_client
         self.vector_store = vector_store
         self.answer_generator = answer_generator
         self.embedding_batch_size = embedding_batch_size
         self.expected_dimension = expected_dimension
+        self.web_search = web_search
+        self.web_search_enabled = web_search_enabled
 
     def query(
-        self,
-        question: str,
-        top_k: int = 5,
-        score_threshold: float | None = None,
+        self, question: str, top_k: int = 5, score_threshold: float | None = None
     ) -> QueryResult:
-        normalized_question = question.strip()
-        if not normalized_question:
-            raise ValueError("Question must not be empty.")
+        normalized_question = validate_question(question)
         if top_k < 1 or top_k > 20:
             raise ValueError("top_k must be between 1 and 20.")
 
-        query_vector = self.embedding_client.embed_query(normalized_question)
-        if len(query_vector) != self.expected_dimension:
-            raise ValueError(
-                f"Query embedding dimension {len(query_vector)} does not match "
-                f"configured dimension {self.expected_dimension}."
+        retrieval_query = normalized_question
+        if self.answer_generator is not None and hasattr(
+            self.answer_generator, "reformulate_query"
+        ):
+            retrieval_query = (
+                self.answer_generator.reformulate_query(normalized_question) or normalized_question
             )
 
+        query_vector = self.embedding_client.embed_query(retrieval_query)
+        if len(query_vector) != self.expected_dimension:
+            raise ValueError(
+                f"Query embedding dimension {len(query_vector)} does not match configured embedding dimension {self.expected_dimension}."
+            )
         retrieved = self.vector_store.search(
-            query_vector=query_vector,
-            top_k=top_k,
-            score_threshold=score_threshold,
+            query_vector=query_vector, top_k=top_k, score_threshold=score_threshold
         )
         query_id = str(uuid4())
-        if not retrieved:
-            return QueryResult(
-                query_id=query_id,
-                status="no_evidence",
-                answer=(
-                    "I couldn't find relevant evidence in the currently indexed "
-                    "IIIT Bhagalpur documents."
-                ),
-                insufficient_evidence=True,
-                sources=[],
-            )
 
         sources = [
             EvidenceSource(
@@ -79,10 +84,50 @@ class QueryService:
                 score=item.score,
                 extraction_method=item.extraction_method,
                 metadata=item.metadata,
-                source_url=f"/api/v1/knowledge-base/documents/{item.document_id}/file",
+                source_type="institutional",
             )
             for index, item in enumerate(retrieved, start=1)
         ]
+
+        web_error = False
+        web_search_attempted = (
+            self.web_search_enabled
+            and self.web_search is not None
+            and needs_live_search(normalized_question)
+        )
+        if web_search_attempted:
+            live_query = retrieval_query + " " + datetime.now().astimezone().date().isoformat()
+            try:
+                web_results = self.web_search.search(live_query)
+                if not web_results:
+                    web_error = True
+                for index, item in enumerate(web_results, start=1):
+                    sources.append(
+                        EvidenceSource(
+                            evidence_id=f"W{index}",
+                            chunk_id="web:" + item["url"],
+                            source_file=item["title"],
+                            excerpt=item["snippet"],
+                            score=1.0,
+                            source_url=item["url"],
+                            source_type="web",
+                            metadata={"domain": item["url"].split("/")[2]},
+                        )
+                    )
+            except Exception:
+                # Keep institutional RAG available if a search provider is temporarily down.
+                web_error = True
+
+        if not sources:
+            note = " Live web search was unavailable." if web_error else ""
+            return QueryResult(
+                query_id=query_id,
+                status="no_evidence",
+                answer="I couldn't find relevant evidence in the indexed IIIT Bhagalpur documents or live search."
+                + note,
+                insufficient_evidence=True,
+                sources=[],
+            )
 
         if self.answer_generator is None:
             return QueryResult(
@@ -93,10 +138,10 @@ class QueryService:
                 sources=sources,
             )
 
-        generated: GeneratedAnswer = self.answer_generator.generate(
-            normalized_question,
-            sources,
-        )
+        answer_question = normalized_question
+        if web_error:
+            answer_question += "\n\nCurrent-information safeguard: live web search returned no usable results or could not be reached. Do not state an office-holder, current notice, deadline, schedule or other time-sensitive fact as verified current. Explicitly say live verification was unavailable and distinguish any dated institute-document evidence."
+        generated: GeneratedAnswer = self.answer_generator.generate(answer_question, sources)
         valid_ids = {source.evidence_id for source in sources}
         invalid_ids = set(generated.citations) - valid_ids
         if invalid_ids:
@@ -108,10 +153,7 @@ class QueryService:
             return QueryResult(
                 query_id=query_id,
                 status="insufficient_evidence",
-                answer=(
-                    "The retrieved passages do not provide enough verified evidence "
-                    "to answer this question confidently."
-                ),
+                answer="The retrieved evidence does not provide enough verified information to answer confidently. Please check the cited official source or contact the institute.",
                 insufficient_evidence=True,
                 sources=sources,
             )

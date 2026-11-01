@@ -2,10 +2,10 @@ import { useEffect, useRef, useState, type DragEvent, type FormEvent, type React
 import {
   Activity, AlertCircle, ArrowRight, BookOpen, Bot, Check, CheckCircle2,
   CircleHelp, Clock3, CloudUpload, FileText, GraduationCap, Layers3, Database,
-  LoaderCircle, MessageSquare, PanelLeftClose, Search, Send, ShieldCheck,
+  LoaderCircle, MessageSquare, PanelLeftClose, Search, Send, ShieldCheck, Trash2,
   Sparkles, UploadCloud, X, RefreshCw,
 } from 'lucide-react'
-import { askQuestion, checkApi, getIngestionJob, getKnowledgeBase, sourceDocumentUrl, retryIngestionFile, uploadDocuments, type EvidenceSource, type IngestionJob, type KnowledgeDocument } from './lib/api'
+import { askQuestion, checkApi, getIngestionJob, getKnowledgeBase, deleteKnowledgeDocument, retryIngestionFile, uploadDocuments, type EvidenceSource, type IngestionJob, type KnowledgeDocument } from './lib/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -37,7 +37,7 @@ function App() {
   const [apiOnline, setApiOnline] = useState(false)
   const [messages, setMessages] = useState<Message[]>([{
     id: 'welcome', role: 'assistant',
-    content: 'Hello! I’m the IIIT Bhagalpur knowledge assistant. Ask me about academics, admissions, fees, hostels, departments, or institute services. I’ll show the source documents behind every result.',
+    content: 'Hello! I’m the IIIT Bhagalpur knowledge assistant. Ask me about academics, admissions, fees, hostels, departments, or institute services. I’ll show the references behind every result.',
   }])
   const [question, setQuestion] = useState('')
   const [asking, setAsking] = useState(false)
@@ -47,6 +47,7 @@ function App() {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([])
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [catalogError, setCatalogError] = useState('')
+  const [deletingDocument, setDeletingDocument] = useState<string | null>(null)
   const [uploadError, setUploadError] = useState('')
   const [dragging, setDragging] = useState(false)
   const [toast, setToast] = useState('')
@@ -101,6 +102,21 @@ function App() {
       window.setTimeout(() => setToast(''), 2800)
     } catch (error) { setUploadError(error instanceof Error ? error.message : 'Upload failed.') }
     finally { setUploading(false) }
+  }
+
+  const removeDocument = async (doc: KnowledgeDocument) => {
+    if (deletingDocument) return
+    const accepted = window.confirm(`Delete “${doc.source_file}” from the knowledge base?\n\nThis removes all ${doc.chunk_count.toLocaleString()} indexed chunks from Qdrant and deletes its local uploaded copy when available. This cannot be undone.`)
+    if (!accepted) return
+    setDeletingDocument(doc.document_id); setCatalogError('')
+    try {
+      const result = await deleteKnowledgeDocument(doc.document_id)
+      setDocuments(current => current.filter(item => item.document_id !== doc.document_id))
+      setToast(`Deleted ${doc.source_file} and ${result.deleted_chunks} Qdrant chunks`)
+      window.setTimeout(() => setToast(''), 3500)
+    } catch (error) {
+      setCatalogError(error instanceof Error ? error.message : 'Could not delete document.')
+    } finally { setDeletingDocument(null) }
   }
 
   const retryFile = async (jobId: string, fileId: string) => {
@@ -166,7 +182,7 @@ function App() {
         </header>
 
         {view === 'chat' ? <section className="chat-page">
-          <div className="chat-heading"><div className="eyebrow"><Sparkles size={13} /> INSTITUTE KNOWLEDGE ASSISTANT</div><h1>What would you like<br className="mobile-break" /> to know?</h1><p>Ask questions about IIIT Bhagalpur. Get grounded information from official institute documents.</p></div>
+          <div className="chat-heading"><div className="eyebrow"><Sparkles size={13} /> INSTITUTE KNOWLEDGE ASSISTANT</div><h1>What would you like<br className="mobile-break" /> to know?</h1><p>Get grounded answers from institute documents, with live web verification for current information.</p></div>
           <div className="chat-scroll"><div className="messages-list">
             {messages.map(message => <article className={'message-row ' + message.role} key={message.id}>
               {message.role === 'assistant' && <div className="message-avatar"><Bot size={17} /></div>}
@@ -181,7 +197,7 @@ function App() {
                   <div className="sources-list">
                     {message.sources.filter(source => source.used_in_answer || !message.sources?.some(item => item.used_in_answer)).map(source => <div className="source-card" key={source.evidence_id}>
                       <div className="source-card-top"><span className="source-ref">{source.evidence_id}</span><strong>{source.source_file}</strong></div>
-                      <div className="source-foot">{source.page_number ? 'Page ' + source.page_number : 'Website / text source'}<> · <a className="source-link" href={sourceDocumentUrl(source.document_id)} target="_blank" rel="noreferrer">Open source document <ArrowRight size={12} /></a></></div>
+                      <div className="source-foot">{source.source_type === 'web' && source.source_url ? <><span>LIVE WEB</span> · <a className="source-link" href={source.source_url} target="_blank" rel="noreferrer">Open webpage <ArrowRight size={12} /></a></> : <span>Institute document{source.page_number ? ' · Page ' + source.page_number : ''}</span>}</div>
                     </div>)}
                   </div>
                 </details>}
@@ -222,9 +238,10 @@ function App() {
           <div className="catalog-summary"><div><span>INDEXED DOCUMENTS</span><strong>{documents.length}</strong></div><div><span>VECTOR COLLECTION</span><strong>Qdrant</strong></div></div>
           {catalogLoading && <div className="catalog-state"><LoaderCircle className="spin" size={18} /> Loading indexed documents…</div>}
           {catalogError && <div className="inline-alert error"><AlertCircle size={16} />{catalogError}</div>}
-          {!catalogLoading && !catalogError && <div className="catalog-list">{documents.length ? documents.map(doc => <article className="catalog-card" key={doc.document_id}>
+          {toast && <div className="inline-alert success"><CheckCircle2 size={16} />{toast}</div>}
+          {!catalogLoading && <div className="catalog-list">{documents.length ? documents.map(doc => <article className="catalog-card" key={doc.document_id}>
             <div className="file-type-icon"><FileText size={18} /></div><div className="catalog-info"><strong>{doc.source_file}</strong><span>{(doc.file_type || 'document').toUpperCase()} · {doc.chunk_count.toLocaleString()} chunks · {doc.page_count ? doc.page_count.toLocaleString() + ' pages' : 'Page count unavailable'}</span><small>ID: {doc.document_id}</small></div>
-            <a className="source-link" href={sourceDocumentUrl(doc.document_id)} target="_blank" rel="noreferrer">Open source <ArrowRight size={13} /></a>
+            <button className="delete-document-button" onClick={() => void removeDocument(doc)} disabled={deletingDocument !== null}><Trash2 size={14} />{deletingDocument === doc.document_id ? 'Deleting…' : 'Delete'}</button>
           </article>) : <div className="catalog-state">No indexed documents found in the configured Qdrant collection.</div>}</div>}
         </section>}
       </main>

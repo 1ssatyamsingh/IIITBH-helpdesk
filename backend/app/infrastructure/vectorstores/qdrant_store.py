@@ -245,16 +245,18 @@ class QdrantVectorStore:
                 metadata = payload.get("metadata")
                 if not isinstance(metadata, dict):
                     metadata = {}
-                entry = documents.setdefault(document_id, {
-                    "document_id": document_id,
-                    "source_file": source_file,
-                    "file_type": payload.get("file_type"),
-                    "chunk_count": 0,
-                    "pages": set(),
-                    "metadata": metadata,
-                    "ingestion_job_id": payload.get("ingestion_job_id"),
-                    "source_url": f"/api/v1/knowledge-base/documents/{document_id}/file",
-                })
+                entry = documents.setdefault(
+                    document_id,
+                    {
+                        "document_id": document_id,
+                        "source_file": source_file,
+                        "file_type": payload.get("file_type"),
+                        "chunk_count": 0,
+                        "pages": set(),
+                        "metadata": metadata,
+                        "ingestion_job_id": payload.get("ingestion_job_id"),
+                    },
+                )
                 entry["chunk_count"] += 1
                 page = payload.get("page_number")
                 if page is not None:
@@ -268,23 +270,72 @@ class QdrantVectorStore:
             result.append(item)
         return sorted(result, key=lambda item: item["source_file"].casefold())
 
-    def delete_document(self, document_id: str) -> None:
+    def get_document_record(self, document_id: str) -> dict | None:
+        if not document_id.strip() or not self.client.collection_exists(self.collection_name):
+            return None
+        self._validate_existing_collection()
+        offset = None
+        while True:
+            points, next_offset = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            for point in points:
+                payload = point.payload or {}
+                if str(payload.get("document_id") or "") == document_id:
+                    return {
+                        "document_id": document_id,
+                        "source_file": payload.get("source_file"),
+                        "ingestion_job_id": payload.get("ingestion_job_id"),
+                    }
+            if next_offset is None:
+                return None
+            offset = next_offset
+
+    def delete_document(self, document_id: str) -> int:
         if not document_id.strip():
             raise ValueError("document_id must not be empty.")
         if not self.client.collection_exists(self.collection_name):
-            return
+            return 0
         self._validate_existing_collection()
+        # Scroll and delete point IDs: this works even when document_id has no
+        # payload index in Qdrant (filter-based deletion would fail in that case).
+        point_ids = []
+        offset = None
+        while True:
+            points, next_offset = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=256,
+                offset=offset,
+                with_payload=True,
+                with_vectors=False,
+            )
+            point_ids.extend(
+                point.id
+                for point in points
+                if str((point.payload or {}).get("document_id")) == document_id
+            )
+            if next_offset is None:
+                break
+            offset = next_offset
+        if not point_ids:
+            raise KeyError(f"Document {document_id} was not found in Qdrant.")
         self.client.delete(
             collection_name=self.collection_name,
-            points_selector=models.FilterSelector(
-                filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="document_id",
-                            match=models.MatchValue(value=document_id),
-                        )
-                    ]
-                )
-            ),
+            points_selector=models.PointIdsList(points=point_ids),
             wait=True,
         )
+        remaining = self.client.retrieve(
+            collection_name=self.collection_name,
+            ids=point_ids,
+            with_payload=True,
+            with_vectors=False,
+        )
+        if remaining:
+            raise VectorStoreError(
+                f"Qdrant delete verification failed: {len(remaining)} point(s) remain."
+            )
+        return len(point_ids)

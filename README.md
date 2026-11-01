@@ -119,3 +119,18 @@ The helper scripts accept command-line options; use `--help` to inspect them. Ke
 ## Notes
 
 This is a local-development oriented project. Review deployment security, authentication, rate limiting, observability, backups and worker scaling before exposing it to the public internet.
+
+
+## Live web search, query reformulation and safety
+
+- Natural-language questions are reformulated by the configured answer model before embedding and Qdrant retrieval. The original user question is retained for answer generation.
+- Time-sensitive queries (for example current director/registrar, latest notices, current schedules and upcoming deadlines) trigger live metasearch through `ddgs`.
+- Live search prioritises official `iiitbh.ac.in` results. Web references are shown separately from indexed institute-document references and can be opened as external webpages.
+- Static institutional questions remain grounded in the Qdrant collection; the assistant does not force web results into every answer.
+- `WEB_SEARCH_ENABLED=true` enables live search. `WEB_SEARCH_MAX_RESULTS=6` controls the maximum number of live references.
+- Query guardrails normalize input, cap question length, reject common prompt-injection attempts and protect hidden instructions/credentials. The answer model receives a system-level safety policy and treats all retrieved document/web content as untrusted data.
+- Answers must cite only retrieved source IDs. Secret-like output patterns are redacted; unsupported or uncited answers are treated as insufficient evidence.
+
+## Knowledge-base document deletion
+
+The Knowledge base view provides a confirmation-protected delete action. It removes every Qdrant point belonging to the selected `document_id`, verifies that the points are gone, and then removes the corresponding local upload and ingestion-file record when available. Documents still being processed cannot be deleted.

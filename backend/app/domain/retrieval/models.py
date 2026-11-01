@@ -27,6 +27,7 @@ class EvidenceSource(BaseModel):
     extraction_method: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     source_url: str | None = None
+    source_type: str = "institutional"
     used_in_answer: bool = False
 
 

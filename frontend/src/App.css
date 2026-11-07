@@ -181,6 +181,11 @@
 @media(max-width:680px){.sidebar{width:64px;flex-basis:64px;padding:18px 9px}.sidebar:not(.collapsed){width:218px;flex-basis:218px}.sidebar.collapsed .brand{flex-direction:column;gap:5px}.sidebar.collapsed .sidebar-toggle{margin:4px auto 0}.sidebar.collapsed .nav-item{justify-content:center;padding-inline:8px}.sidebar.collapsed .nav-item i{display:none}.topbar{height:60px;flex-basis:60px;padding-inline:13px}.topbar-right{gap:5px}.breadcrumb{gap:6px;font-size:9px}.connection-pill{padding:6px 8px;font-size:9px}.chat-page{min-height:calc(100vh - 60px);padding:25px 15px 17px}.chat-heading{padding:5px 0 15px}.chat-heading h1{font-size:31px}.chat-heading p{max-width:320px;margin:0 auto;font-size:10px}.mobile-break{display:initial}.message-row{max-width:100%;gap:8px}.message-avatar{width:27px;height:27px}.message-bubble{padding:11px 12px;font-size:11px}.suggestions{margin-left:0}.suggestion-grid{grid-template-columns:1fr}.suggestion-card{min-height:41px}.composer{height:53px;padding-left:12px}.composer input{font-size:11px}.composer-caption{font-size:8px;line-height:1.5}.ingestion-page{padding:25px 14px 40px}.page-title-row{align-items:flex-start;flex-direction:column;padding-bottom:18px}.page-title-row h1{font-size:27px}.page-title-row p{font-size:10px}.pipeline-badge{display:none}.ingestion-layout{grid-template-columns:1fr;padding-top:20px}.ingestion-aside{display:grid;grid-template-columns:1fr}.dropzone{min-height:205px}.file-rules{gap:9px;font-size:8px}.section-heading h2{font-size:14px}.job-file{gap:7px}.file-status{font-size:7px}}
 
 /* Responsive workspace and readable answer layout */
+.chat-page{height:calc(100dvh - 70px);min-height:0;overflow:hidden}
+.chat-scroll{flex:1;min-height:0;overflow-y:auto}
+.chat-heading{flex:0 0 auto}
+.composer-wrap{flex:0 0 auto}
+
 .app-shell{height:100dvh;min-height:0;overflow:hidden}
 .sidebar{position:sticky;top:0;height:100dvh;min-height:0;overflow-y:auto;overflow-x:hidden;flex-shrink:0;scrollbar-width:thin;scrollbar-color:#35525b transparent}
 .main-panel{height:100dvh;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}

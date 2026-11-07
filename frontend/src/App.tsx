@@ -47,7 +47,7 @@ function App() {
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([])
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [catalogError, setCatalogError] = useState('')
-  const [deletingDocument, setDeletingDocument] = useState<string | null>(null)
+  const [deletingDocuments, setDeletingDocuments] = useState<Set<string>>(() => new Set())
   const [uploadError, setUploadError] = useState('')
   const [dragging, setDragging] = useState(false)
   const [toast, setToast] = useState('')
@@ -105,18 +105,20 @@ function App() {
   }
 
   const removeDocument = async (doc: KnowledgeDocument) => {
-    if (deletingDocument) return
+    if (deletingDocuments.has(doc.document_id)) return
     const accepted = window.confirm(`Delete “${doc.source_file}” from the knowledge base?\n\nThis removes all ${doc.chunk_count.toLocaleString()} indexed chunks from Qdrant and deletes its local uploaded copy when available. This cannot be undone.`)
     if (!accepted) return
-    setDeletingDocument(doc.document_id); setCatalogError('')
+    setDeletingDocuments(current => new Set(current).add(doc.document_id)); setCatalogError('')
     try {
       const result = await deleteKnowledgeDocument(doc.document_id)
       setDocuments(current => current.filter(item => item.document_id !== doc.document_id))
       setToast(`Deleted ${doc.source_file} and ${result.deleted_chunks} Qdrant chunks`)
       window.setTimeout(() => setToast(''), 3500)
     } catch (error) {
-      setCatalogError(error instanceof Error ? error.message : 'Could not delete document.')
-    } finally { setDeletingDocument(null) }
+      setCatalogError(error instanceof Error ? error.message : `Could not delete ${doc.source_file}.`)
+    } finally {
+      setDeletingDocuments(current => { const next = new Set(current); next.delete(doc.document_id); return next })
+    }
   }
 
   const retryFile = async (jobId: string, fileId: string) => {
@@ -182,7 +184,7 @@ function App() {
         </header>
 
         {view === 'chat' ? <section className="chat-page">
-          <div className="chat-heading"><div className="eyebrow"><Sparkles size={13} /> INSTITUTE KNOWLEDGE ASSISTANT</div><h1>What would you like<br className="mobile-break" /> to know?</h1><p>Get grounded answers from institute documents, with live web verification for current information.</p></div>
+          {messages.length === 1 && <div className="chat-heading"><div className="eyebrow"><Sparkles size={13} /> INSTITUTE KNOWLEDGE ASSISTANT</div><h1>What would you like<br className="mobile-break" /> to know?</h1><p>Get grounded answers from institute documents, with live web verification for current information.</p></div>}
           <div className="chat-scroll"><div className="messages-list">
             {messages.map(message => <article className={'message-row ' + message.role} key={message.id}>
               {message.role === 'assistant' && <div className="message-avatar"><Bot size={17} /></div>}
@@ -241,7 +243,7 @@ function App() {
           {toast && <div className="inline-alert success"><CheckCircle2 size={16} />{toast}</div>}
           {!catalogLoading && <div className="catalog-list">{documents.length ? documents.map(doc => <article className="catalog-card" key={doc.document_id}>
             <div className="file-type-icon"><FileText size={18} /></div><div className="catalog-info"><strong>{doc.source_file}</strong><span>{(doc.file_type || 'document').toUpperCase()} · {doc.chunk_count.toLocaleString()} chunks · {doc.page_count ? doc.page_count.toLocaleString() + ' pages' : 'Page count unavailable'}</span><small>ID: {doc.document_id}</small></div>
-            <button className="delete-document-button" onClick={() => void removeDocument(doc)} disabled={deletingDocument !== null}><Trash2 size={14} />{deletingDocument === doc.document_id ? 'Deleting…' : 'Delete'}</button>
+            <button className="delete-document-button" onClick={() => void removeDocument(doc)} disabled={deletingDocuments.has(doc.document_id)}><Trash2 size={14} />{deletingDocuments.has(doc.document_id) ? 'Deleting…' : 'Delete'}</button>
           </article>) : <div className="catalog-state">No indexed documents found in the configured Qdrant collection.</div>}</div>}
         </section>}
       </main>

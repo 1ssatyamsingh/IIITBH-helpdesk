@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $Backend = Split-Path -Parent $PSScriptRoot
 $Python = Join-Path $Backend ".venv\Scripts\python.exe"
 $Llama = Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe\llama-server.exe"
@@ -31,7 +31,7 @@ if (-not $Ready) { throw "Local Qwen embedding server did not become healthy on 
 
 if (-not (Test-LocalPort 8018)) {
     Start-Process -FilePath $Python -WorkingDirectory $Backend -ArgumentList @(
-        "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8018"
+        "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8018"
     ) -RedirectStandardOutput (Join-Path $Logs "api.log") -RedirectStandardError (Join-Path $Logs "api-error.log") -WindowStyle Hidden
 }
 
@@ -48,3 +48,5 @@ Write-Host "Qwen embeddings: http://127.0.0.1:8088 (healthy)"
 Write-Host "RAG API:         http://127.0.0.1:8018"
 Write-Host "API docs:        http://127.0.0.1:8018/docs"
 Write-Host "Worker:          running or starting"
+
+

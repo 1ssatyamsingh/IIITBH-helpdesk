@@ -1,6 +1,6 @@
 import pytest
 
-from app.application.query.query_service import InvalidCitationError, QueryService
+from app.application.query.query_service import InvalidCitationError, QueryService, needs_live_search, rank_retrieved_chunks
 from app.domain.retrieval.models import GeneratedAnswer, RetrievedChunk
 
 
@@ -41,6 +41,41 @@ def _retrieved() -> RetrievedChunk:
         extraction_method="txt_loader",
         metadata={"ingestion_job_id": "job-1"},
     )
+
+
+def test_live_search_is_triggered_for_year_specific_institute_questions() -> None:
+    assert needs_live_search("Show the academic calendar for 2026–27") is True
+    assert needs_live_search("What is the B.Tech fee structure?") is False
+
+
+def test_live_search_is_triggered_for_current_director_questions() -> None:
+    assert needs_live_search("Who is the director?") is True
+    assert needs_live_search("Who was the director in 2020?") is True
+
+
+def test_btech_fee_retrieval_prefers_latest_matching_year_and_excludes_other_programmes() -> None:
+    legacy = _retrieved().model_copy(update={
+        "point_id": "legacy-fee",
+        "score": 0.82,
+        "source_file": "Document__BTech_Fee_Structure.pdf",
+        "text": "B.Tech tuition fee and fee structure for students admitted after 2019.",
+    })
+    latest = _retrieved().model_copy(update={
+        "point_id": "latest-fee",
+        "score": 0.70,
+        "source_file": "Fee Structure 2026-27 B.Tech.pdf",
+        "text": "B.Tech fee structure for 2026 admission through JoSAA and CSAB.",
+    })
+    wrong_programme = _retrieved().model_copy(update={
+        "point_id": "mtech-fee",
+        "score": 0.78,
+        "source_file": "MTech Fees Structure.txt",
+        "text": "M.Tech tuition fee and semester fees.",
+    })
+
+    ranked = rank_retrieved_chunks("What are the BTech fee details?", [legacy, wrong_programme, latest])
+
+    assert [item.point_id for item in ranked] == ["latest-fee", "legacy-fee"]
 
 
 def test_query_returns_evidence_when_answer_model_not_configured() -> None:

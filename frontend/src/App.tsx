@@ -5,7 +5,8 @@ import {
   LoaderCircle, MessageSquare, PanelLeftClose, Search, Send, ShieldCheck, Trash2,
   Sparkles, UploadCloud, X, RefreshCw,
 } from 'lucide-react'
-import { askQuestion, checkApi, getIngestionJob, getKnowledgeBase, deleteKnowledgeDocument, retryIngestionFile, uploadDocuments, type EvidenceSource, type IngestionJob, type KnowledgeDocument } from './lib/api'
+import { askQuestionStream } from './lib/streaming'
+import { checkApi, getIngestionJob, getKnowledgeBase, deleteKnowledgeDocument, retryIngestionFile, uploadDocuments, type EvidenceSource, type IngestionJob, type KnowledgeDocument } from './lib/api'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -14,7 +15,7 @@ import 'katex/dist/katex.min.css'
 import './App.css'
 
 type View = 'chat' | 'ingestion' | 'knowledgebase'
-type Message = { id: string; role: 'assistant' | 'user'; content: string; sources?: EvidenceSource[]; error?: boolean }
+type Message = { id: string; role: 'assistant' | 'user'; content: string; sources?: EvidenceSource[]; error?: boolean; streaming?: boolean }
 const prompts = [
   'What are the B.Tech fee details?',
   'Show me the academic calendar for 2026–27.',
@@ -134,16 +135,30 @@ function App() {
     const clean = (value ?? question).trim()
     if (!clean || asking) return
     setQuestion('')
-    setMessages(current => [...current, { id: crypto.randomUUID(), role: 'user', content: clean }])
+    const assistantId = crypto.randomUUID()
+    setMessages(current => [...current,
+      { id: crypto.randomUUID(), role: 'user', content: clean },
+      { id: assistantId, role: 'assistant', content: '', streaming: true },
+    ])
     setAsking(true)
     try {
-      const result = await askQuestion(clean)
-      const content = result.answer || (result.sources.length
-        ? 'I found relevant passages in the indexed institute documents. The answer-generation model is not configured yet, so I’m showing retrieved evidence instead of generating an unsupported answer.'
-        : 'I couldn’t find relevant evidence in the currently indexed documents. Try a more specific question, or check whether the source documents have been ingested.')
-      setMessages(current => [...current, { id: result.query_id, role: 'assistant', content, sources: result.sources }])
+      const result = await askQuestionStream(
+        clean,
+        chunk => setMessages(current => current.map(message => message.id === assistantId
+          ? { ...message, content: message.content + chunk } : message)),
+        sources => setMessages(current => current.map(message => message.id === assistantId
+          ? { ...message, sources } : message)),
+      )
+      const fallback = result.sources.length
+        ? 'I found relevant passages in the indexed institute documents, but no answer text was generated. Please review the sources below.'
+        : 'I couldn’t find relevant evidence in the currently indexed documents. Try a more specific question, or check whether the source documents have been ingested.'
+      setMessages(current => current.map(message => message.id === assistantId
+        ? { ...message, content: result.answer || fallback, sources: result.sources, streaming: false }
+        : message))
     } catch (error) {
-      setMessages(current => [...current, { id: crypto.randomUUID(), role: 'assistant', content: error instanceof Error ? error.message : 'The query failed. Please try again.', error: true }])
+      setMessages(current => current.map(message => message.id === assistantId
+        ? { ...message, content: error instanceof Error ? error.message : 'The query failed. Please try again.', error: true, streaming: false }
+        : message))
     } finally { setAsking(false) }
   }
 
@@ -191,7 +206,9 @@ function App() {
               <div className="message-content"><div className="message-meta">{message.role === 'assistant' ? 'CAMPUS ASSISTANT' : 'YOU'}{message.error && <span className="error-tag">ERROR</span>}</div>
                 <div className={'message-bubble ' + message.role}>
                   {message.role === 'assistant'
-                    ? <div className="markdown-answer"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{ table: ({ children }) => <div className="markdown-table-wrap"><table>{children}</table></div> }}>{message.content}</ReactMarkdown></div>
+                    ? message.streaming && !message.content
+                      ? <div className="answer-skeleton" role="status" aria-label="Preparing answer"><span className="skeleton-line wide" /><span className="skeleton-line" /><span className="skeleton-line medium" /><span className="skeleton-line short" /></div>
+                      : <div className="markdown-answer"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{ table: ({ children }) => <div className="markdown-table-wrap"><table>{children}</table></div> }}>{message.content}</ReactMarkdown>{message.streaming && <span className="streaming-caret" aria-hidden="true" />}</div>
                     : message.content}
                 </div>
                 {!!message.sources?.length && <details className="sources-block">

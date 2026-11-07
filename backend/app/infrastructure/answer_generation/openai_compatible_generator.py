@@ -33,12 +33,47 @@ class OpenAICompatibleAnswerGenerator:
         self.http = http_client or httpx.Client(timeout=timeout_seconds)
 
     def _complete(
-        self, messages: list[dict[str, str]], max_tokens: int = 2048, temperature: float = 0.2
+        self, messages: list[dict[str, str]], max_tokens: int = 2048, temperature: float = 0.2,
+        on_token=None,
     ) -> str:
         content: Any = None
         last_error: Exception | None = None
         for attempt in range(3):
             try:
+                if on_token is not None:
+                    content_parts: list[str] = []
+                    with self.http.stream(
+                        "POST", self.url,
+                        headers={
+                            "Authorization": "Bearer " + self.api_key,
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": self.model_id,
+                            "temperature": temperature,
+                            "max_completion_tokens": max_tokens,
+                            "messages": messages,
+                            "stream": True,
+                        },
+                    ) as streamed:
+                        streamed.raise_for_status()
+                        for line in streamed.iter_lines():
+                            if not line or not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == "[DONE]":
+                                break
+                            try:
+                                delta = httpx.Response(200, json={}).json() if False else __import__("json").loads(data)
+                                token = delta["choices"][0].get("delta", {}).get("content") or ""
+                            except (KeyError, IndexError, TypeError, ValueError):
+                                continue
+                            if token:
+                                content_parts.append(token)
+                                on_token(token)
+                    content = "".join(content_parts)
+                    last_error = None
+                    break
                 response = self.http.post(
                     self.url,
                     headers={
@@ -108,7 +143,7 @@ class OpenAICompatibleAnswerGenerator:
         except AnswerGenerationError:
             return question
 
-    def generate(self, question: str, evidence: list[EvidenceSource]) -> GeneratedAnswer:
+    def generate(self, question: str, evidence: list[EvidenceSource], on_token=None) -> GeneratedAnswer:
         if not evidence:
             return GeneratedAnswer(answer="", citations=[])
         evidence_blocks = []
@@ -159,6 +194,7 @@ class OpenAICompatibleAnswerGenerator:
                     ],
                     max_tokens=2300,
                     temperature=0.2,
+                    on_token=on_token,
                 )
             )
         except AnswerGenerationError:

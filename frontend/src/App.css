@@ -228,3 +228,12 @@
 .delete-document-button:disabled{opacity:.55;cursor:wait}
 .catalog-card .catalog-info{flex:1}
 .source-foot .source-link{font-size:10px}
+
+/* Streaming answer skeleton and live-generation caret */
+.answer-skeleton{display:flex;flex-direction:column;gap:11px;min-height:96px;padding:2px 0;max-width:680px}
+.skeleton-line{display:block;width:82%;height:11px;border-radius:999px;background:linear-gradient(90deg,#e8efeb 20%,#f5f8f6 48%,#e8efeb 76%);background-size:220% 100%;animation:skeleton-shimmer 1.35s ease-in-out infinite}
+.skeleton-line.wide{width:96%}.skeleton-line.medium{width:66%}.skeleton-line.short{width:42%}
+@keyframes skeleton-shimmer{0%{background-position:100% 0}100%{background-position:-120% 0}}
+.streaming-caret{display:inline-block;width:2px;height:1.05em;margin-left:3px;vertical-align:text-bottom;background:#4d8974;animation:caret-blink .85s step-end infinite}
+@keyframes caret-blink{50%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.skeleton-line,.streaming-caret{animation:none}.skeleton-line{background:#edf3ef}}

@@ -84,7 +84,7 @@ class QueryService:
         self.web_search_enabled = web_search_enabled
 
     def query(
-        self, question: str, top_k: int = 5, score_threshold: float | None = None
+        self, question: str, top_k: int = 5, score_threshold: float | None = None, on_token=None
     ) -> QueryResult:
         normalized_question = validate_question(question)
         if top_k < 1 or top_k > 20:
@@ -174,7 +174,11 @@ class QueryService:
         answer_question = normalized_question
         if web_error:
             answer_question += "\n\nCurrent-information safeguard: live web search returned no usable results or could not be reached. Do not state an office-holder, current notice, deadline, schedule or other time-sensitive fact as verified current. Explicitly say live verification was unavailable and distinguish any dated institute-document evidence."
-        generated: GeneratedAnswer = self.answer_generator.generate(answer_question, sources)
+        generated: GeneratedAnswer = (
+            self.answer_generator.generate(answer_question, sources)
+            if on_token is None
+            else self.answer_generator.generate(answer_question, sources, on_token=on_token)
+        )
         valid_ids = {source.evidence_id for source in sources}
         invalid_ids = set(generated.citations) - valid_ids
         if invalid_ids:

@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type DragEvent, type FormEvent, type ReactNode } from 'react'
+
+const MarkdownAnswer = lazy(() => import('./MarkdownAnswer'))
 import {
   Activity, AlertCircle, ArrowRight, BookOpen, Bot, Check, CheckCircle2,
   CircleHelp, Clock3, CloudUpload, FileText, GraduationCap, Layers3, Database,
@@ -7,15 +9,10 @@ import {
 } from 'lucide-react'
 import { askQuestionStream } from './lib/streaming'
 import { checkApi, getIngestionJob, getKnowledgeBase, deleteKnowledgeDocument, retryIngestionFile, uploadDocuments, type EvidenceSource, type IngestionJob, type KnowledgeDocument } from './lib/api'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import remarkMath from 'remark-math'
-import rehypeKatex from 'rehype-katex'
-import 'katex/dist/katex.min.css'
 import './App.css'
 
 type View = 'chat' | 'ingestion' | 'knowledgebase'
-type Message = { id: string; role: 'assistant' | 'user'; content: string; sources?: EvidenceSource[]; error?: boolean; streaming?: boolean }
+type Message = { id: string; role: 'assistant' | 'user'; content: string; sources?: EvidenceSource[]; error?: boolean; streaming?: boolean; markdown?: boolean }
 const prompts = [
   'What are the B.Tech fee details?',
   'Show me the academic calendar for 2026–27.',
@@ -37,7 +34,7 @@ function App() {
   const [view, setView] = useState<View>('chat')
   const [apiOnline, setApiOnline] = useState(false)
   const [messages, setMessages] = useState<Message[]>([{
-    id: 'welcome', role: 'assistant',
+    id: 'welcome', role: 'assistant', markdown: false,
     content: 'Hello! I’m the IIIT Bhagalpur knowledge assistant. Ask me about academics, admissions, fees, hostels, departments, or institute services. I’ll show the references behind every result.',
   }])
   const [question, setQuestion] = useState('')
@@ -46,7 +43,13 @@ function App() {
   const [uploading, setUploading] = useState(false)
   const [job, setJob] = useState<IngestionJob | null>(null)
   const [documents, setDocuments] = useState<KnowledgeDocument[]>([])
+  const [catalogTotal, setCatalogTotal] = useState(0)
+  const [catalogHasMore, setCatalogHasMore] = useState(false)
+  const [catalogNextOffset, setCatalogNextOffset] = useState<number | null>(10)
+  const [catalogSort, setCatalogSort] = useState<'source_file' | 'chunk_count' | 'page_count'>('source_file')
+  const [catalogOrder, setCatalogOrder] = useState<'asc' | 'desc'>('asc')
   const [catalogLoading, setCatalogLoading] = useState(false)
+  const [catalogLoadingMore, setCatalogLoadingMore] = useState(false)
   const [catalogError, setCatalogError] = useState('')
   const [deletingDocuments, setDeletingDocuments] = useState<Set<string>>(() => new Set())
   const [uploadError, setUploadError] = useState('')
@@ -66,12 +69,18 @@ function App() {
   useEffect(() => {
     if (view !== 'knowledgebase') return
     let active = true
-    setCatalogLoading(true); setCatalogError('')
-    getKnowledgeBase().then(result => { if (active) setDocuments(result.documents) })
+    getKnowledgeBase({ limit: 10, offset: 0, sort_by: catalogSort, order: catalogOrder })
+      .then(result => {
+        if (!active) return
+        setDocuments(result.documents)
+        setCatalogTotal(result.document_count)
+        setCatalogHasMore(result.has_more)
+        setCatalogNextOffset(result.next_offset)
+      })
       .catch(error => { if (active) setCatalogError(error instanceof Error ? error.message : 'Could not load documents.') })
       .finally(() => { if (active) setCatalogLoading(false) })
     return () => { active = false }
-  }, [view])
+  }, [view, catalogSort, catalogOrder])
   useEffect(() => {
     if (!job || !['queued', 'processing'].includes(job.status)) return
     const timer = window.setInterval(async () => {
@@ -113,6 +122,7 @@ function App() {
     try {
       const result = await deleteKnowledgeDocument(doc.document_id)
       setDocuments(current => current.filter(item => item.document_id !== doc.document_id))
+      setCatalogTotal(current => Math.max(0, current - 1))
       setToast(`Deleted ${doc.source_file} and ${result.deleted_chunks} Qdrant chunks`)
       window.setTimeout(() => setToast(''), 3500)
     } catch (error) {
@@ -120,6 +130,35 @@ function App() {
     } finally {
       setDeletingDocuments(current => { const next = new Set(current); next.delete(doc.document_id); return next })
     }
+  }
+
+  const refreshCatalog = async () => {
+    setCatalogLoading(true); setCatalogError('')
+    try {
+      const result = await getKnowledgeBase({ limit: 10, offset: 0, sort_by: catalogSort, order: catalogOrder, refresh: true })
+      setDocuments(result.documents)
+      setCatalogTotal(result.document_count)
+      setCatalogHasMore(result.has_more)
+      setCatalogNextOffset(result.next_offset)
+    } catch (error) {
+      setCatalogError(error instanceof Error ? error.message : 'Could not load documents.')
+    } finally { setCatalogLoading(false) }
+  }
+
+  const loadMoreCatalog = async () => {
+    if (catalogLoadingMore || !catalogHasMore || catalogNextOffset === null) return
+    setCatalogLoadingMore(true); setCatalogError('')
+    try {
+      const result = await getKnowledgeBase({ limit: 10, offset: catalogNextOffset, sort_by: catalogSort, order: catalogOrder })
+      setDocuments(current => {
+        const existing = new Set(current.map(item => item.document_id))
+        return [...current, ...result.documents.filter(item => !existing.has(item.document_id))]
+      })
+      setCatalogHasMore(result.has_more)
+      setCatalogNextOffset(result.next_offset)
+    } catch (error) {
+      setCatalogError(error instanceof Error ? error.message : 'Could not load more documents.')
+    } finally { setCatalogLoadingMore(false) }
   }
 
   const retryFile = async (jobId: string, fileId: string) => {
@@ -138,17 +177,34 @@ function App() {
     const assistantId = crypto.randomUUID()
     setMessages(current => [...current,
       { id: crypto.randomUUID(), role: 'user', content: clean },
-      { id: assistantId, role: 'assistant', content: '', streaming: true },
+      { id: assistantId, role: 'assistant', content: '', streaming: true, markdown: true },
     ])
     setAsking(true)
+    let pendingText = ''
+    let animationFrame = 0
+    const flushStreamText = () => {
+      if (!pendingText) return
+      const chunk = pendingText
+      pendingText = ''
+      setMessages(current => current.map(message => message.id === assistantId
+        ? { ...message, content: message.content + chunk } : message))
+    }
     try {
       const result = await askQuestionStream(
         clean,
-        chunk => setMessages(current => current.map(message => message.id === assistantId
-          ? { ...message, content: message.content + chunk } : message)),
+        chunk => {
+          pendingText += chunk
+          if (!animationFrame) animationFrame = window.requestAnimationFrame(() => {
+            animationFrame = 0
+            flushStreamText()
+          })
+        },
         sources => setMessages(current => current.map(message => message.id === assistantId
           ? { ...message, sources } : message)),
       )
+      if (animationFrame) window.cancelAnimationFrame(animationFrame)
+      animationFrame = 0
+      flushStreamText()
       const fallback = result.sources.length
         ? 'I found relevant passages in the indexed institute documents, but no answer text was generated. Please review the sources below.'
         : 'I couldn’t find relevant evidence in the currently indexed documents. Try a more specific question, or check whether the source documents have been ingested.'
@@ -156,6 +212,9 @@ function App() {
         ? { ...message, content: result.answer || fallback, sources: result.sources, streaming: false }
         : message))
     } catch (error) {
+      if (animationFrame) window.cancelAnimationFrame(animationFrame)
+      animationFrame = 0
+      flushStreamText()
       setMessages(current => current.map(message => message.id === assistantId
         ? { ...message, content: error instanceof Error ? error.message : 'The query failed. Please try again.', error: true, streaming: false }
         : message))
@@ -182,7 +241,7 @@ function App() {
         <nav className="main-nav">
           <button className={'nav-item ' + (view === 'chat' ? 'active' : '')} onClick={() => setView('chat')}><MessageSquare size={18} />{sidebarOpen && <span>Ask the institute</span>}{view === 'chat' && <i />}</button>
           <button className={'nav-item ' + (view === 'ingestion' ? 'active' : '')} onClick={() => setView('ingestion')}><Layers3 size={18} />{sidebarOpen && <span>Knowledge ingestion</span>}{view === 'ingestion' && <i />}</button>
-          <button className={'nav-item ' + (view === 'knowledgebase' ? 'active' : '')} onClick={() => setView('knowledgebase')}><Database size={18} />{sidebarOpen && <span>Knowledge base</span>}{view === 'knowledgebase' && <i />}</button>
+          <button className={'nav-item ' + (view === 'knowledgebase' ? 'active' : '')} onClick={() => { setCatalogLoading(true); setCatalogError(''); setView('knowledgebase') }}><Database size={18} />{sidebarOpen && <span>Knowledge base</span>}{view === 'knowledgebase' && <i />}</button>
         </nav>
         {sidebarOpen && <>
           <div className="sidebar-divider" />
@@ -206,9 +265,11 @@ function App() {
               <div className="message-content"><div className="message-meta">{message.role === 'assistant' ? 'CAMPUS ASSISTANT' : 'YOU'}{message.error && <span className="error-tag">ERROR</span>}</div>
                 <div className={'message-bubble ' + message.role}>
                   {message.role === 'assistant'
-                    ? message.streaming && !message.content
-                      ? <div className="answer-skeleton" role="status" aria-label="Preparing answer"><span className="skeleton-line wide" /><span className="skeleton-line" /><span className="skeleton-line medium" /><span className="skeleton-line short" /></div>
-                      : <div className="markdown-answer"><ReactMarkdown remarkPlugins={[remarkGfm, remarkMath]} rehypePlugins={[rehypeKatex]} components={{ table: ({ children }) => <div className="markdown-table-wrap"><table>{children}</table></div> }}>{message.content}</ReactMarkdown>{message.streaming && <span className="streaming-caret" aria-hidden="true" />}</div>
+                    ? !message.markdown
+                      ? message.content
+                      : message.streaming && !message.content
+                        ? <div className="answer-skeleton" role="status" aria-label="Preparing answer"><span className="skeleton-line wide" /><span className="skeleton-line" /><span className="skeleton-line medium" /><span className="skeleton-line short" /></div>
+                        : <div className="markdown-answer"><Suspense fallback={<div className="answer-skeleton" role="status" aria-label="Loading answer renderer"><span className="skeleton-line wide" /><span className="skeleton-line" /><span className="skeleton-line medium" /></div>}><MarkdownAnswer content={message.content} /></Suspense>{message.streaming && <span className="streaming-caret" aria-hidden="true" />}</div>
                     : message.content}
                 </div>
                 {!!message.sources?.length && <details className="sources-block">
@@ -253,8 +314,9 @@ function App() {
             <div className="aside-note"><Clock3 size={15} /><p>Processing runs in a separate worker. Keep the backend worker running while a batch is queued.</p></div>
           </aside></div>
         </section> : <section className="ingestion-page knowledge-page">
-          <div className="page-title-row"><div><div className="eyebrow"><Database size={13} /> INDEXED CONTENT</div><h1>Knowledge base</h1><p>Browse the unique source documents currently represented in the vector collection.</p></div><button className="primary-button" onClick={() => { setCatalogLoading(true); setCatalogError(''); void getKnowledgeBase().then(result => setDocuments(result.documents)).catch(error => setCatalogError(error instanceof Error ? error.message : 'Could not load documents.')).finally(() => setCatalogLoading(false)) }}><RefreshCw size={15} /> Refresh list</button></div>
-          <div className="catalog-summary"><div><span>INDEXED DOCUMENTS</span><strong>{documents.length}</strong></div><div><span>VECTOR COLLECTION</span><strong>Qdrant</strong></div></div>
+          <div className="page-title-row"><div><div className="eyebrow"><Database size={13} /> INDEXED CONTENT</div><h1>Knowledge base</h1><p>Browse the unique source documents currently represented in the vector collection.</p></div><button className="primary-button" onClick={() => void refreshCatalog()} disabled={catalogLoading}><RefreshCw size={15} /> Refresh list</button></div>
+          <div className="catalog-summary"><div><span>INDEXED DOCUMENTS</span><strong>{catalogTotal.toLocaleString()}</strong><small>Showing {documents.length.toLocaleString()} of {catalogTotal.toLocaleString()}</small></div><div><span>VECTOR COLLECTION</span><strong>Qdrant</strong></div></div>
+          <div className="catalog-controls"><div className="catalog-control"><label htmlFor="catalog-sort">Sort documents</label><select id="catalog-sort" value={catalogSort} onChange={event => { setCatalogLoading(true); setCatalogError(''); setCatalogSort(event.target.value as typeof catalogSort) }}><option value="source_file">Document name</option><option value="chunk_count">Chunk count</option><option value="page_count">Page count</option></select></div><div className="catalog-control"><label htmlFor="catalog-order">Order</label><select id="catalog-order" value={catalogOrder} onChange={event => { setCatalogLoading(true); setCatalogError(''); setCatalogOrder(event.target.value as typeof catalogOrder) }}><option value="asc">Ascending</option><option value="desc">Descending</option></select></div><div className="catalog-page-size"><span>Page size</span><strong>10 documents</strong></div></div>
           {catalogLoading && <div className="catalog-state"><LoaderCircle className="spin" size={18} /> Loading indexed documents…</div>}
           {catalogError && <div className="inline-alert error"><AlertCircle size={16} />{catalogError}</div>}
           {toast && <div className="inline-alert success"><CheckCircle2 size={16} />{toast}</div>}
@@ -262,6 +324,8 @@ function App() {
             <div className="file-type-icon"><FileText size={18} /></div><div className="catalog-info"><strong>{doc.source_file}</strong><span>{(doc.file_type || 'document').toUpperCase()} · {doc.chunk_count.toLocaleString()} chunks · {doc.page_count ? doc.page_count.toLocaleString() + ' pages' : 'Page count unavailable'}</span><small>ID: {doc.document_id}</small></div>
             <button className="delete-document-button" onClick={() => void removeDocument(doc)} disabled={deletingDocuments.has(doc.document_id)}><Trash2 size={14} />{deletingDocuments.has(doc.document_id) ? 'Deleting…' : 'Delete'}</button>
           </article>) : <div className="catalog-state">No indexed documents found in the configured Qdrant collection.</div>}</div>}
+          {!catalogLoading && catalogHasMore && <div className="catalog-load-more"><span>Showing {documents.length.toLocaleString()} of {catalogTotal.toLocaleString()} documents</span><button className="primary-button" onClick={() => void loadMoreCatalog()} disabled={catalogLoadingMore}>{catalogLoadingMore ? <><LoaderCircle size={15} className="spin" /> Loading…</> : <>Load 10 more <ArrowRight size={15} /></>}</button></div>}
+          {!catalogLoading && !catalogHasMore && catalogTotal > 0 && <div className="catalog-end-note">All {catalogTotal.toLocaleString()} documents loaded.</div>}
         </section>}
       </main>
     </div>

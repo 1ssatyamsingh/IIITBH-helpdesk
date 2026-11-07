@@ -1,13 +1,18 @@
 from pathlib import Path
+from threading import Lock
+from time import monotonic
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from app.core.config import Settings, get_settings
 from app.infrastructure.persistence.sqlite_job_repository import SQLiteJobRepository
 from app.infrastructure.vectorstores.qdrant_store import QdrantVectorStore
 
 router = APIRouter(prefix="/knowledge-base", tags=["knowledge-base"])
+_catalog_cache: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+_catalog_cache_lock = Lock()
+_CATALOG_CACHE_TTL_SECONDS = 60
 
 
 def _store(settings: Settings) -> QdrantVectorStore:
@@ -17,21 +22,54 @@ def _store(settings: Settings) -> QdrantVectorStore:
 
 
 @router.get("/documents", summary="List unique documents indexed in the knowledge base")
-def list_knowledge_documents(settings: Settings = Depends(get_settings)) -> dict:
-    store = _store(settings)
+def list_knowledge_documents(
+    limit: int = Query(default=10, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    sort_by: str = Query(default="source_file", pattern="^(source_file|chunk_count|page_count)$"),
+    order: str = Query(default="asc", pattern="^(asc|desc)$"),
+    refresh: bool = False,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    cache_key = (settings.qdrant_url, settings.qdrant_collection)
+    store = None
     try:
-        documents = store.list_documents()
+        with _catalog_cache_lock:
+            cached = _catalog_cache.get(cache_key)
+            if not refresh and cached and monotonic() - cached[0] < _CATALOG_CACHE_TTL_SECONDS:
+                documents = list(cached[1])
+            else:
+                store = _store(settings)
+                documents = store.list_documents()
+                _catalog_cache[cache_key] = (monotonic(), list(documents))
+        documents.sort(
+            key=lambda item: (
+                str(item.get(sort_by, "")).casefold()
+                if sort_by == "source_file"
+                else int(item.get(sort_by, 0) or 0)
+            ),
+            reverse=order == "desc",
+        )
+        total = len(documents)
+        page = documents[offset : offset + limit]
+        next_offset = offset + len(page) if offset + len(page) < total else None
         return {
             "collection": settings.qdrant_collection,
-            "document_count": len(documents),
-            "documents": documents,
+            "document_count": total,
+            "documents": page,
+            "limit": limit,
+            "offset": offset,
+            "has_more": next_offset is not None,
+            "next_offset": next_offset,
+            "sort_by": sort_by,
+            "order": order,
         }
     except Exception as exc:
         raise HTTPException(
             status_code=502, detail="Could not read the Qdrant document catalogue."
         ) from exc
     finally:
-        store.client.close()
+        if store is not None:
+            store.client.close()
 
 
 @router.delete("/documents/{document_id}", summary="Delete a document and all its vectors")
@@ -75,9 +113,14 @@ def delete_knowledge_document(
                 }:
                     raise HTTPException(
                         status_code=409,
-                        detail="This document is still being processed. Try again after ingestion finishes.",
+                        detail=(
+                            "This document is still being processed. "
+                            "Try again after ingestion finishes."
+                        ),
                     )
         deleted_chunks = store.delete_document(document_id)
+        with _catalog_cache_lock:
+            _catalog_cache.pop((settings.qdrant_url, settings.qdrant_collection), None)
     except HTTPException:
         raise
     except KeyError as exc:

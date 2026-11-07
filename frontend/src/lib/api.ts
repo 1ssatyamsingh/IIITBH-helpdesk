@@ -17,6 +17,8 @@ export type KnowledgeDocument = {
 }
 export type KnowledgeBaseResult = {
   collection: string; document_count: number; documents: KnowledgeDocument[]
+  limit: number; offset: number; has_more: boolean; next_offset: number | null
+  sort_by: 'source_file' | 'chunk_count' | 'page_count'; order: 'asc' | 'desc'
 }
 export type IngestionFile = {
   file_id: string; original_filename: string; file_type: string | null
@@ -42,7 +44,16 @@ export function checkApi() { return fetch(API + '/health').then(r => r.ok).catch
 export function askQuestion(question: string) {
   return request<QueryResult>('/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ question, top_k: 6 }) })
 }
-export function getKnowledgeBase() { return request<KnowledgeBaseResult>('/knowledge-base/documents') }
+export function getKnowledgeBase(options: { limit?: number; offset?: number; sort_by?: 'source_file' | 'chunk_count' | 'page_count'; order?: 'asc' | 'desc'; refresh?: boolean } = {}) {
+  const params = new URLSearchParams({
+    limit: String(options.limit ?? 10),
+    offset: String(options.offset ?? 0),
+    sort_by: options.sort_by ?? 'source_file',
+    order: options.order ?? 'asc',
+    refresh: String(options.refresh ?? false),
+  })
+  return request<KnowledgeBaseResult>('/knowledge-base/documents?' + params.toString())
+}
 export function deleteKnowledgeDocument(documentId: string) {
   return request<{ deleted: boolean; deleted_chunks: number; local_upload_deleted: boolean }>(
     '/knowledge-base/documents/' + encodeURIComponent(documentId),

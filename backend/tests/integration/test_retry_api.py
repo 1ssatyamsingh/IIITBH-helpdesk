@@ -9,7 +9,8 @@ from app.main import app
 
 
 def test_retry_endpoint_requeues_a_blocked_file(tmp_path: Path):
-    source = tmp_path / "handbook.txt"
+    source = tmp_path / "uploads" / "handbook.txt"
+    source.parent.mkdir(parents=True)
     source.write_text("IIIT Bhagalpur official handbook", encoding="utf-8")
     repository = SQLiteJobRepository(tmp_path / "jobs.sqlite3")
     repository.create_job(
@@ -49,7 +50,7 @@ def test_retry_endpoint_rejects_missing_source_file(tmp_path: Path):
             {
                 "file_id": "file-missing",
                 "original_filename": "missing.txt",
-                "storage_path": str(tmp_path / "missing.txt"),
+                "storage_path": str(tmp_path / "uploads" / "missing.txt"),
                 "file_type": "txt",
             }
         ],
@@ -64,5 +65,27 @@ def test_retry_endpoint_rejects_missing_source_file(tmp_path: Path):
         response = client.post("/api/v1/ingestion/jobs/job-missing/files/file-missing/retry")
         assert response.status_code == 409
         assert "source file is missing" in response.json()["detail"]
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_retry_endpoint_rejects_source_outside_upload_root(tmp_path: Path):
+    source = tmp_path / "outside.txt"
+    source.write_text("outside upload directory", encoding="utf-8")
+    repository = SQLiteJobRepository(tmp_path / "jobs.sqlite3")
+    repository.create_job(
+        "job-outside",
+        [{"file_id": "file-outside", "original_filename": source.name,
+          "storage_path": str(source), "file_type": "txt"}],
+    )
+    repository.claim_next_file()
+    repository.update_file("file-outside", "failed", error="retry")
+    app.dependency_overrides[get_settings] = lambda: Settings(data_dir=tmp_path)
+    app.dependency_overrides[get_job_repository] = lambda: repository
+    client = TestClient(app)
+    try:
+        response = client.post("/api/v1/ingestion/jobs/job-outside/files/file-outside/retry")
+        assert response.status_code == 409
+        assert "upload directory" in response.json()["detail"]
     finally:
         app.dependency_overrides.clear()

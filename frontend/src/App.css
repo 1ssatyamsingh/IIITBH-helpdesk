@@ -181,6 +181,11 @@
 @media(max-width:680px){.sidebar{width:64px;flex-basis:64px;padding:18px 9px}.sidebar:not(.collapsed){width:218px;flex-basis:218px}.sidebar.collapsed .brand{flex-direction:column;gap:5px}.sidebar.collapsed .sidebar-toggle{margin:4px auto 0}.sidebar.collapsed .nav-item{justify-content:center;padding-inline:8px}.sidebar.collapsed .nav-item i{display:none}.topbar{height:60px;flex-basis:60px;padding-inline:13px}.topbar-right{gap:5px}.breadcrumb{gap:6px;font-size:9px}.connection-pill{padding:6px 8px;font-size:9px}.chat-page{min-height:calc(100vh - 60px);padding:25px 15px 17px}.chat-heading{padding:5px 0 15px}.chat-heading h1{font-size:31px}.chat-heading p{max-width:320px;margin:0 auto;font-size:10px}.mobile-break{display:initial}.message-row{max-width:100%;gap:8px}.message-avatar{width:27px;height:27px}.message-bubble{padding:11px 12px;font-size:11px}.suggestions{margin-left:0}.suggestion-grid{grid-template-columns:1fr}.suggestion-card{min-height:41px}.composer{height:53px;padding-left:12px}.composer input{font-size:11px}.composer-caption{font-size:8px;line-height:1.5}.ingestion-page{padding:25px 14px 40px}.page-title-row{align-items:flex-start;flex-direction:column;padding-bottom:18px}.page-title-row h1{font-size:27px}.page-title-row p{font-size:10px}.pipeline-badge{display:none}.ingestion-layout{grid-template-columns:1fr;padding-top:20px}.ingestion-aside{display:grid;grid-template-columns:1fr}.dropzone{min-height:205px}.file-rules{gap:9px;font-size:8px}.section-heading h2{font-size:14px}.job-file{gap:7px}.file-status{font-size:7px}}
 
 /* Responsive workspace and readable answer layout */
+.chat-page{height:calc(100dvh - 70px);min-height:0;overflow:hidden}
+.chat-scroll{flex:1;min-height:0;overflow-y:auto}
+.chat-heading{flex:0 0 auto}
+.composer-wrap{flex:0 0 auto}
+
 .app-shell{height:100dvh;min-height:0;overflow:hidden}
 .sidebar{position:sticky;top:0;height:100dvh;min-height:0;overflow-y:auto;overflow-x:hidden;flex-shrink:0;scrollbar-width:thin;scrollbar-color:#35525b transparent}
 .main-panel{height:100dvh;min-height:0;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain}
@@ -223,3 +228,24 @@
 .delete-document-button:disabled{opacity:.55;cursor:wait}
 .catalog-card .catalog-info{flex:1}
 .source-foot .source-link{font-size:10px}
+
+/* Streaming answer skeleton and live-generation caret */
+.answer-skeleton{display:flex;flex-direction:column;gap:11px;min-height:96px;padding:2px 0;max-width:680px}
+.skeleton-line{display:block;width:82%;height:11px;border-radius:999px;background:linear-gradient(90deg,#e8efeb 20%,#f5f8f6 48%,#e8efeb 76%);background-size:220% 100%;animation:skeleton-shimmer 1.35s ease-in-out infinite}
+.skeleton-line.wide{width:96%}.skeleton-line.medium{width:66%}.skeleton-line.short{width:42%}
+@keyframes skeleton-shimmer{0%{background-position:100% 0}100%{background-position:-120% 0}}
+.streaming-caret{display:inline-block;width:2px;height:1.05em;margin-left:3px;vertical-align:text-bottom;background:#4d8974;animation:caret-blink .85s step-end infinite}
+@keyframes caret-blink{50%{opacity:0}}
+@media(prefers-reduced-motion:reduce){.skeleton-line,.streaming-caret{animation:none}.skeleton-line{background:#edf3ef}}
+
+.catalog-controls { display: flex; align-items: end; gap: 14px; flex-wrap: wrap; margin: 18px 0 16px; padding: 14px 16px; border: 1px solid var(--border, #e5e7eb); border-radius: 14px; background: var(--surface, #fff); }
+.catalog-control { display: grid; gap: 6px; min-width: 180px; }
+.catalog-control label, .catalog-page-size span { color: var(--muted, #6b7280); font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+.catalog-control select { width: 100%; min-height: 38px; padding: 8px 11px; border: 1px solid var(--border, #d1d5db); border-radius: 9px; color: var(--text, #111827); background: var(--surface, #fff); font: inherit; }
+.catalog-page-size { display: grid; gap: 6px; padding: 0 8px 7px; }
+.catalog-page-size strong { color: var(--text, #111827); font-size: 13px; }
+.catalog-summary small { display: block; margin-top: 5px; color: var(--muted, #6b7280); font-size: 12px; }
+.catalog-load-more { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin: 18px 0 8px; padding: 14px 0; }
+.catalog-load-more > span, .catalog-end-note { color: var(--muted, #6b7280); font-size: 13px; }
+.catalog-end-note { text-align: center; padding: 18px 0; }
+@media (max-width: 600px) { .catalog-controls { align-items: stretch; flex-direction: column; } .catalog-control { min-width: 0; } .catalog-load-more { align-items: stretch; flex-direction: column; } }

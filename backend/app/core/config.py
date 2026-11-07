@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +20,7 @@ class Settings(BaseSettings):
     frontend_origins: str = "http://localhost:5173"
     max_upload_files: int = 20
     max_upload_mb: int = 50
+    max_upload_batch_mb: int = 200
     data_dir: Path = Path(__file__).resolve().parents[2] / "data"
     pdf_min_text_characters_per_page: int = 30
     chunk_size: int = 1200
@@ -47,6 +49,19 @@ class Settings(BaseSettings):
 
     web_search_enabled: bool = True
     web_search_max_results: int = 6
+
+    @field_validator("frontend_origins")
+    @classmethod
+    def validate_frontend_origins(cls, value: str) -> str:
+        origins = [origin.strip() for origin in value.split(",") if origin.strip()]
+        if not origins:
+            raise ValueError("At least one explicit frontend origin must be configured.")
+        if "*" in origins:
+            raise ValueError("Wildcard CORS origins are not allowed when credentials are enabled.")
+        for origin in origins:
+            if origin == "null" or not origin.startswith(("http://", "https://")):
+                raise ValueError("Frontend origins must be explicit HTTP(S) origins.")
+        return ",".join(dict.fromkeys(origins))
 
     @property
     def cors_origins(self) -> list[str]:

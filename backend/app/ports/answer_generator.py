@@ -8,4 +8,5 @@ class AnswerGenerator(Protocol):
         self,
         question: str,
         evidence: list[EvidenceSource],
+        on_token=None,
     ) -> GeneratedAnswer: ...

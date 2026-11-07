@@ -72,3 +72,21 @@ def test_upload_size_limit_marks_only_oversized_file_rejected(tmp_path: Path) ->
         assert statuses["small.txt"] == "received"
     finally:
         app.dependency_overrides.clear()
+
+
+def test_pdf_upload_requires_pdf_magic_bytes(tmp_path: Path):
+    settings = Settings(data_dir=tmp_path, max_upload_files=5, max_upload_mb=1)
+    repository = SQLiteJobRepository(tmp_path / "ingestion.sqlite3")
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_job_repository] = lambda: repository
+    client = TestClient(app)
+    try:
+        response = client.post(
+            "/api/v1/ingestion/jobs",
+            files=[("files", ("not-a-pdf.pdf", b"plain text pretending to be pdf", "application/pdf"))],
+        )
+        assert response.status_code == 202
+        assert response.json()["files"][0]["status"] == "rejected"
+        assert "PDF signature" in response.json()["files"][0]["error"]
+    finally:
+        app.dependency_overrides.clear()

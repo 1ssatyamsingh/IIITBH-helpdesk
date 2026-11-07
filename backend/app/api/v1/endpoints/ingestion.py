@@ -42,6 +42,8 @@ async def create_ingestion_job(
     job_directory = settings.data_dir / "uploads" / job_id
     job_directory.mkdir(parents=True, exist_ok=True)
     file_records: list[dict] = []
+    accepted_batch_bytes = 0
+    batch_limit_bytes = settings.max_upload_batch_mb * 1024 * 1024
 
     try:
         for upload in files:
@@ -69,7 +71,11 @@ async def create_ingestion_job(
                     while block := await upload.read(UPLOAD_CHUNK_BYTES):
                         total_bytes += len(block)
                         if total_bytes > settings.max_upload_mb * 1024 * 1024:
-                            raise ValueError(f"File exceeds the {settings.max_upload_mb} MB limit.")
+                            raise ValueError(f"File exceeds the {settings.max_upload_mb} MB per-file limit.")
+                        if accepted_batch_bytes + total_bytes > batch_limit_bytes:
+                            raise ValueError(
+                                f"Batch exceeds the {settings.max_upload_batch_mb} MB aggregate limit."
+                            )
                         destination.write(block)
             except ValueError as exc:
                 stored_path.unlink(missing_ok=True)
@@ -86,6 +92,21 @@ async def create_ingestion_job(
                 continue
 
             await upload.close()
+            if suffix == ".pdf":
+                with stored_path.open("rb") as source:
+                    has_pdf_signature = source.read(5) == b"%PDF-"
+                if not has_pdf_signature:
+                    stored_path.unlink(missing_ok=True)
+                    file_records.append(
+                        {
+                            "file_id": file_id,
+                            "original_filename": original_filename,
+                            "file_type": "pdf",
+                            "status": FileProcessingStatus.REJECTED.value,
+                            "error": "Invalid PDF file: missing PDF signature (%PDF-).",
+                        }
+                    )
+                    continue
             if total_bytes == 0:
                 stored_path.unlink(missing_ok=True)
                 file_records.append(
@@ -99,6 +120,7 @@ async def create_ingestion_job(
                 )
                 continue
 
+            accepted_batch_bytes += total_bytes
             file_records.append(
                 {
                     "file_id": file_id,

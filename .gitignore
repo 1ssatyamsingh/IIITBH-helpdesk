@@ -7,6 +7,7 @@
 **/.env.*
 !**/.env.example
 !**/.env.template
+!frontend/.env.production
 *.pem
 *.key
 *.p12

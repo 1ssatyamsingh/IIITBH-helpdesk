@@ -1,4 +1,4 @@
-const API = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8018/api/v1').replace(/\/$/, '')
+const API = (import.meta.env.VITE_API_BASE_URL || 'https://iiitbh-helpdesk-1.onrender.com/api/v1').replace(/\/$/, '')
 
 export type EvidenceSource = {
   evidence_id: string; chunk_id: string; source_file: string; document_id: string
@@ -32,7 +32,7 @@ export type IngestionJob = {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response
   try { response = await fetch(API + path, init) }
-  catch { throw new Error('Cannot reach the RAG API. Start the backend on port 8018.') }
+  catch { throw new Error('Cannot reach the RAG API. Ensure the backend is running.') }
   if (!response.ok) {
     let message = 'Request failed (' + response.status + ')'
     try { const body = await response.json(); if (typeof body.detail === 'string') message = body.detail } catch {}

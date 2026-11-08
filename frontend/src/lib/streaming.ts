@@ -1,6 +1,6 @@
 import type { EvidenceSource, QueryResult } from './api'
 
-const API = (import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8018/api/v1').replace(/\/$/, '')
+const API = (import.meta.env.VITE_API_BASE_URL || 'https://iiitbh-helpdesk-1.onrender.com/api/v1').replace(/\/$/, '')
 
 type StreamEvent =
   | { type: 'chunk'; text: string }
@@ -21,7 +21,7 @@ export async function askQuestionStream(
       body: JSON.stringify({ question, top_k: 6 }),
     })
   } catch {
-    throw new Error('Cannot reach the RAG API. Start the backend on port 8018.')
+    throw new Error('Cannot reach the RAG API. Ensure the backend is running.')
   }
 
   if (!response.ok) {

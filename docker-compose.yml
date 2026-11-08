@@ -1,0 +1,97 @@
+services:
+  embeddings:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    command:
+      - -hf
+      - Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0
+      - --embedding
+      - --pooling
+      - last
+      - --embd-normalize
+      - "2"
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8088"
+      - --n-gpu-layers
+      - "0"
+      - --threads
+      - "4"
+      - --threads-batch
+      - "4"
+      - -b
+      - "512"
+      - -ub
+      - "512"
+      - -np
+      - "1"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8088/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 180s
+      retries: 5
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    env_file:
+      - backend/.env
+    environment:
+      APP_ENV: production
+      FRONTEND_ORIGINS: http://localhost,http://127.0.0.1
+      LOCAL_EMBEDDING_BASE_URL: http://embeddings:8088
+      DATA_DIR: /app/data
+    ports:
+      - "8018:8018"
+    volumes:
+      - rag_data:/app/data
+    depends_on:
+      embeddings:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8018/api/v1/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "app.workers.runner"]
+    env_file:
+      - backend/.env
+    environment:
+      APP_ENV: production
+      FRONTEND_ORIGINS: http://localhost,http://127.0.0.1
+      LOCAL_EMBEDDING_BASE_URL: http://embeddings:8088
+      DATA_DIR: /app/data
+    volumes:
+      - rag_data:/app/data
+    depends_on:
+      embeddings:
+        condition: service_healthy
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        VITE_API_BASE_URL: /api/v1
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  rag_data:

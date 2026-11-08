@@ -1,0 +1,68 @@
+# Render Blueprint specification for IIITBH Helpdesk Backend
+# Docs: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: iiitbh-rag-backend
+    runtime: python
+    rootDir: backend
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: APP_NAME
+        value: IIITBH RAG API
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: API_V1_PREFIX
+        value: /api/v1
+      - key: EMBEDDED_WORKER
+        value: "true"
+      - key: EMBEDDING_PROVIDER
+        value: cloudflare
+      - key: CLOUDFLARE_EMBEDDING_MODEL_ID
+        value: "@cf/qwen/qwen3-embedding-0.6b"
+      - key: EMBEDDING_DIMENSION
+        value: "1024"
+      - key: EMBEDDING_BATCH_SIZE
+        value: "8"
+      - key: CHUNK_SIZE
+        value: "800"
+      - key: CHUNK_OVERLAP
+        value: "120"
+      - key: QDRANT_COLLECTION
+        value: document_rag
+      - key: QDRANT_DISTANCE
+        value: Cosine
+      - key: ANSWER_MODEL_PROVIDER
+        value: groq
+      - key: ANSWER_MODEL_BASE_URL
+        value: "https://api.groq.com/openai/v1"
+      - key: ANSWER_MODEL_ID
+        value: "openai/gpt-oss-120b"
+      - key: GROQ_VLM_MODEL
+        value: "qwen/qwen3.8-27b"
+      - key: GROQ_RENDER_DPI
+        value: "144"
+      - key: GROQ_MAX_IMAGE_MB
+        value: "18"
+      - key: WEB_SEARCH_ENABLED
+        value: "true"
+      - key: WEB_SEARCH_MAX_RESULTS
+        value: "6"
+      # Secure credentials to be supplied in Render dashboard:
+      - key: FRONTEND_ORIGINS
+        sync: false
+      - key: QDRANT_URL
+        sync: false
+      - key: QDRANT_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
+        sync: false
+      - key: CLOUDFLARE_ACCOUNT_ID
+        sync: false
+      - key: CLOUDFLARE_API_TOKEN
+        sync: false
+

@@ -52,11 +52,13 @@ class Settings(BaseSettings):
 
     web_search_enabled: bool = True
     web_search_max_results: int = 6
+    embedded_worker: bool = False
+    worker_poll_interval: float = 2.0
 
     @field_validator("frontend_origins")
     @classmethod
     def validate_frontend_origins(cls, value: str) -> str:
-        origins = [origin.strip() for origin in value.split(",") if origin.strip()]
+        origins = [origin.strip().rstrip("/") for origin in value.split(",") if origin.strip()]
         if not origins:
             raise ValueError("At least one explicit frontend origin must be configured.")
         if "*" in origins:

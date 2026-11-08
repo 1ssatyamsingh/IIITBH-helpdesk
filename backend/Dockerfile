@@ -2,7 +2,8 @@ FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PORT=8018
 
 WORKDIR /app
 
@@ -19,4 +20,4 @@ RUN mkdir -p /app/data/uploads
 
 EXPOSE 8018
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8018"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8018}"]

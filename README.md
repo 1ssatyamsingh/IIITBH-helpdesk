@@ -205,3 +205,11 @@ docker push <dockerhub-username>/iiitbh-rag-frontend:1.0.0
 For a deployment host, replace the `build:` blocks for `backend` and `frontend` in `docker-compose.yml` with the respective `image:` tags, transfer the compose file and backend environment file securely, then run `docker compose pull` and `docker compose up -d`. Never publish `backend/.env` or credentials to Docker Hub or source control. The embedding image/model and Qdrant/Groq services must also be accessible in the target environment.
 
 For additional commands and troubleshooting, see [docker-deploy.md](docker-deploy.md).
+
+## Cloud deployment (Render)
+
+To deploy the backend on Render (render.com):
+- The repository provides a ready-to-use Render Blueprint (`render.yaml`) and `.python-version`.
+- Cloud embeddings are powered by Cloudflare Workers AI (`@cf/qwen/qwen3-embedding-0.6b`).
+- Single-instance background ingestion worker is supported via `EMBEDDED_WORKER=true`.
+- Detailed deployment instructions for both Blueprint (1-click) and manual setup are in [render-deploy.md](render-deploy.md).

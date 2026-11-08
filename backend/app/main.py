@@ -1,3 +1,5 @@
+import logging
+import threading
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -7,10 +9,44 @@ from app.api.dependencies import close_cached_query_services
 from app.api.v1.router import api_router
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def lifespan(_application: FastAPI):
+    settings = get_settings()
+    worker_thread = None
+    stop_event = threading.Event()
+
+    if settings.embedded_worker:
+        from app.infrastructure.persistence.sqlite_job_repository import SQLiteJobRepository
+        from app.workers.ingestion_worker import IngestionWorker
+
+        def _worker_loop() -> None:
+            logger.info("Embedded ingestion worker thread started.")
+            repository = SQLiteJobRepository(settings.data_dir / "ingestion.sqlite3")
+            worker = IngestionWorker(repository=repository, settings=settings)
+            while not stop_event.is_set():
+                try:
+                    processed = worker.process_next_file()
+                    if not processed:
+                        stop_event.wait(timeout=max(settings.worker_poll_interval, 0.5))
+                except Exception as exc:
+                    logger.exception("Error in embedded ingestion worker: %s", exc)
+                    stop_event.wait(timeout=max(settings.worker_poll_interval, 1.0))
+            logger.info("Embedded ingestion worker thread stopped.")
+
+        worker_thread = threading.Thread(
+            target=_worker_loop,
+            daemon=True,
+            name="EmbeddedIngestionWorker",
+        )
+        worker_thread.start()
     yield
+    if worker_thread is not None:
+        stop_event.set()
+        worker_thread.join(timeout=3.0)
+
     close_cached_query_services()
 
 

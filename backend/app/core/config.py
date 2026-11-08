@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     embedding_provider: str = "local"
     embedding_model_id: str = "Qwen/Qwen3-Embedding-0.6B-GGUF:Q8_0"
     local_embedding_base_url: str | None = "http://127.0.0.1:8088"
+    cloudflare_account_id: str | None = None
+    cloudflare_api_token: str | None = None
+    cloudflare_embedding_model_id: str = "@cf/qwen/qwen3-embedding-0.6b"
     embedding_dimension: int = 1024
     embedding_batch_size: int = 8
 
@@ -62,6 +65,12 @@ class Settings(BaseSettings):
             if origin == "null" or not origin.startswith(("http://", "https://")):
                 raise ValueError("Frontend origins must be explicit HTTP(S) origins.")
         return ",".join(dict.fromkeys(origins))
+
+    @property
+    def resolved_embedding_model_id(self) -> str:
+        if self.embedding_provider.strip().lower() == "cloudflare":
+            return self.cloudflare_embedding_model_id
+        return self.embedding_model_id
 
     @property
     def cors_origins(self) -> list[str]:

@@ -7,8 +7,9 @@
 
 ## Run the complete stack locally
 1. Copy `backend/.env.example` to `backend/.env`.
-2. Set at least `QDRANT_URL`, `QDRANT_API_KEY`, and `GROQ_API_KEY`. Confirm your Qdrant collection uses 1,024-dimensional cosine vectors.
-3. From the repository root:
+2. Set at least `QDRANT_URL`, `QDRANT_API_KEY`, and `GROQ_API_KEY`. Confirm your Qdrant collection uses 1,024-dimensional cosine vectors. For local Docker, keep `EMBEDDING_PROVIDER=local` and use the Compose-managed llama.cpp service.
+3. For a cloud backend that does not run llama.cpp locally, select Cloudflare Workers AI: set `EMBEDDING_PROVIDER=cloudflare`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_API_TOKEN`, and `CLOUDFLARE_EMBEDDING_MODEL_ID=@cf/qwen/qwen3-embedding-0.6b`. Keep `EMBEDDING_DIMENSION=1024` and make sure the target Qdrant collection is also configured with 1,024-dimensional cosine vectors. Create a Cloudflare API token with Workers AI inference permission; never commit the token.
+4. From the repository root:
 
    ```powershell
    docker compose build
@@ -16,7 +17,7 @@
    docker compose ps
    ```
 
-4. Open:
+5. Open:
    - Web UI: http://localhost
    - API docs: http://localhost/docs
    - Direct API: http://localhost:8018/docs

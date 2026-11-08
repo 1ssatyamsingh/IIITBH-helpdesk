@@ -76,3 +76,21 @@ tmp/
 *.tmp
 *.orig
 *.rej
+
+# LaTeX build artifacts (report/)
+report/*.aux
+report/*.toc
+report/*.out
+report/*.bbl
+report/*.blg
+report/*.synctex.gz
+report/*.fls
+report/*.fdb_latexmk
+report/*.pdf
+
+# Additional tool-generated caches
+**/.vite-temp/
+**/.pytest_cache/
+**/.ruff_cache/
+**/*.egg-info/
+backend/test_stream_probe.py

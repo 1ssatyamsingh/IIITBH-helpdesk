@@ -120,8 +120,16 @@ class IngestionWorker:
                 return True
 
             missing_configuration = []
-            if not self.settings.local_embedding_base_url:
-                missing_configuration.append("LOCAL_EMBEDDING_BASE_URL")
+            if self.settings.embedding_provider.strip().lower() == "local":
+                if not self.settings.local_embedding_base_url:
+                    missing_configuration.append("LOCAL_EMBEDDING_BASE_URL")
+            elif self.settings.embedding_provider.strip().lower() == "cloudflare":
+                if not self.settings.cloudflare_account_id:
+                    missing_configuration.append("CLOUDFLARE_ACCOUNT_ID")
+                if not self.settings.cloudflare_api_token:
+                    missing_configuration.append("CLOUDFLARE_API_TOKEN")
+            else:
+                missing_configuration.append("EMBEDDING_PROVIDER (local or cloudflare)")
             if not self.settings.qdrant_url:
                 missing_configuration.append("QDRANT_URL")
             if missing_configuration:
@@ -155,7 +163,7 @@ class IngestionWorker:
                 point_ids = vector_store.upsert_chunks(
                     chunks=result.chunks,
                     vectors=vectors,
-                    embedding_model=self.settings.embedding_model_id,
+                    embedding_model=self.settings.resolved_embedding_model_id,
                     ingestion_job_id=job_id,
                 )
             finally:
@@ -168,7 +176,7 @@ class IngestionWorker:
                     **processing_metadata,
                     "indexed_point_count": len(point_ids),
                     "qdrant_point_ids": point_ids,
-                    "embedding_model": self.settings.embedding_model_id,
+                    "embedding_model": self.settings.resolved_embedding_model_id,
                 },
             )
         except Exception as exc:

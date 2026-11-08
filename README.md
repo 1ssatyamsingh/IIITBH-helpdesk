@@ -134,3 +134,74 @@ This is a local-development oriented project. Review deployment security, authen
 ## Knowledge-base document deletion
 
 The Knowledge base view provides a confirmation-protected delete action. It removes every Qdrant point belonging to the selected `document_id`, verifies that the points are gone, and then removes the corresponding local upload and ingestion-file record when available. Documents still being processed cannot be deleted.
+
+
+## Docker deployment (complete stack)
+
+The repository includes Docker Compose configuration for the React UI, FastAPI API, ingestion worker, and local llama.cpp Qwen embedding server. Qdrant Cloud and Groq remain managed external services.
+
+### Prerequisites
+
+- Docker Desktop with the Linux engine (WSL2 backend on Windows).
+- A configured Qdrant Cloud collection with 1,024-dimensional cosine vectors.
+- Groq API key; Langfuse credentials are optional.
+
+### Configure secrets
+
+Copy the backend example environment file and fill in your credentials:
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+```
+
+Set `QDRANT_URL`, `QDRANT_API_KEY`, and `GROQ_API_KEY` in `backend/.env`. Do not commit this file or add keys to frontend variables. The Compose setup overrides the embedding endpoint to the internal service URL `http://embeddings:8088` and configures the browser frontend to use the same-origin API path `/api/v1`.
+
+### Build and start locally
+
+From the repository root:
+
+```powershell
+docker compose config --quiet
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+Open the web app at http://localhost. API documentation is at http://localhost/docs (or direct API port http://localhost:8018/docs). The Qwen GGUF model downloads on the embedding service's first launch and may take a while and require several GB of disk and RAM.
+
+Compose services:
+
+- `frontend`: Nginx serving the compiled React application and reverse-proxying `/api/` to FastAPI.
+- `backend`: FastAPI HTTP API.
+- `worker`: background document ingestion worker.
+- `embeddings`: llama.cpp Qwen3 embedding service.
+
+Backend and worker share the named `rag_data` volume for uploaded documents and SQLite job records. To inspect logs or stop the stack:
+
+```powershell
+docker compose logs -f backend worker embeddings frontend
+docker compose down
+```
+
+`docker compose down -v` also deletes the persistent `rag_data` volume and its uploads/job records; use only if you intend to erase this data.
+
+### Publish application images to Docker Hub
+
+Authenticate with Docker Hub (using your Docker Hub account):
+
+```powershell
+docker login
+```
+
+Build and push the backend and frontend images. Replace `<dockerhub-username>` with your account username and make sure the matching repositories exist on Docker Hub:
+
+```powershell
+docker build -f backend/Dockerfile -t <dockerhub-username>/iiitbh-rag-backend:1.0.0 .
+docker build -f frontend/Dockerfile --build-arg VITE_API_BASE_URL=/api/v1 -t <dockerhub-username>/iiitbh-rag-frontend:1.0.0 .
+docker push <dockerhub-username>/iiitbh-rag-backend:1.0.0
+docker push <dockerhub-username>/iiitbh-rag-frontend:1.0.0
+```
+
+For a deployment host, replace the `build:` blocks for `backend` and `frontend` in `docker-compose.yml` with the respective `image:` tags, transfer the compose file and backend environment file securely, then run `docker compose pull` and `docker compose up -d`. Never publish `backend/.env` or credentials to Docker Hub or source control. The embedding image/model and Qdrant/Groq services must also be accessible in the target environment.
+
+For additional commands and troubleshooting, see [docker-deploy.md](docker-deploy.md).
